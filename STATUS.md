@@ -11,29 +11,32 @@
 
 ---
 
-## Iteration 112: верификация iter-111 плана — 6 критических ошибок найдено и исправлено
+## Iteration 113-doc: KI#86 — numpy/faiss dependency-trap в rvc-python (тот же pattern, что fairseq)
 
 **Date**: 2026-08-06
 **Scale**: Normal. Doc-only — no code changes. 3 files: `STATUS.md`, `worklog.md`, `docs/fairseq_removal_plan.md`.
 
-**Task**: Заказчик попросил перепроверить всё исследование iter-111, убедиться что решение «ультимативное со всех сторон». Клонированы и проверены upstream-репозитории: daswer123/rvc-python (PyPI upstream), JarodMica/rvc-python (текущий SoW pin), RVC-Project/Retrieval-based-Voice-Conversion-WebUI (official), JackismyShephard/ultimate-rvc (пропущенная альтернатива). Проверены 3 HF-модели, 6 PyPI-пакетов rvc, контракт extract_features.
+**Task**: Заказчик проверил iter-112 план через сторонний отчёт (Politrees/contentvec + модификация pipeline.py). Перепроверен каждый пункт отчёта против реального кода: 5 утверждений подтверждены, 5 опровергнуты/уточнены. Главное открытие: **7-я ошибка iter-112 плана** (KI#85 ловил 6, эта пропущена) — `pyproject.toml` rvc-python пинит `numpy<=1.23.5` и `faiss-cpu==1.7.3`, что воспроизводит тот же dependency-trap pattern, что `fairseq==0.12.2`. SoW пинит `numpy==1.26.4` → resolver conflict.
 
-**Найдено 6 ошибок в iter-111 плане** (KI#85 открыт):
-1. **HF-модель**: iter-111 указывал `facebook/hubert-base-ls960` (стандартный HuBERT для ASR). RVC обучен против ContentVec — стандартный HuBERT даёт неправильные фичи. Исправлено: `lengyue233/content-vec-best` (ContentVec в HF формате).
-2. **HubertHFWrapper**: iter-111 использовал plain `HubertModel` → `final_proj` выбрасывал RuntimeError → ломал v1-модели. Исправлено: наследует `HubertModelWithFinalProj` (3-строчный подкласс из официального RVC `infer/hubert.py`), загружает `final_proj` веса из ContentVec.
-3. **attention_mask**: iter-111 передавал `~padding_mask` (bool tensor) в HF. Исправлено: `(~padding_mask.bool()).long()` (LongTensor, 1=real token) — каноничный паттерн из официального RVC.
-4. **pyproject.toml форка**: iter-111 утверждал «rvc-python НЕ перечисляет fairseq в зависимостях». Это верно для JarodMica@9a67ac7 (SoW pin), но НЕверно для daswer123@0.1.5 (рекомендованная база форка) — там `fairseq==0.12.2` явно пинит. Добавлен шаг: удалить `"fairseq==0.12.2"` из `pyproject.toml` в форке.
-5. **JarodMica characterization**: iter-111 исследование называло JarodMica/rvc-python «ноу-нейм форк (12★)». Реальность: активный форк, last commit Mar 2026, автор вносил правки (May 2025 «fix hubert issues», Mar 2026 «Update library to change where sources are downloaded from»). Не «ноу-нейм».
-6. **Пропущенные альтернативы**: найдено 2 fairseq-free пакета на PyPI: `ultimate-rvc==0.6.0` (318★, MIT, `transformers==4.57.3` — точное совпадение с SoW, Python 3.12+) и `zerorvc==0.0.19`. Ultimate-rvc отклонён как drop-in replacement (приносит ~30 тяжёлых deps, другой API), но его `HubertModelWithFinalProj` + `load_embedding` код использован как референс.
+**Что сделано**:
+1. Открыт KI#86 (BLOCKING) — отдельно от KI#85, т.к. это другой класс ошибок (upstream pin lock-in vs implementation correctness).
+2. В `docs/fairseq_removal_plan.md` добавлен §1.8 (52 строки) с таблицей upstream-пинов daswer123@cff3ffb vs JarodMica@782467a vs SoW, объяснением почему `numpy<=1.23.5` критичен, контрактом `faiss-cpu` (единственное использование `read_index` в `pipeline.py:313`), решением (`numpy>=1.21,<3` + `faiss-cpu>=1.7,<2`), verification script.
+3. §3 stages: iter-113 шаги расширены — добавлен relaxation numpy/faiss + verification script.
+4. §5 риски: добавлены 2 строки про numpy 2.x compat и faiss-cpu 1.8.x compat.
+5. §8 итог: добавлена разблокировка KI#86.
+6. §9 audit checklist: 14→18 пунктов (4 новых про numpy/faiss verification).
+7. История ревизий (header) обновлена iter-113-doc entry.
+
+**Проверено через прямое клонирование**: daswer123@cff3ffb и JarodMica@782467a — оба пинят `numpy<=1.23.5` + `faiss-cpu==1.7.3` одинаково. JarodMica bumped только `omegaconf` (2.0.6→2.3.0, May 2025).
 
 ### Stop point
 
 | Field | Value |
 |-------|-------|
-| Done | Верификация завершена. 6 ошибок найдено и исправлено в `docs/fairseq_removal_plan.md`: §1.1 (правильное описание зависимостей daswer123 vs JarodMica), §1.5 (ContentVec вместо стандартного HuBERT), §1.6 (v1+v2 контракт через HubertModelWithFinalProj), §1.7 (pyproject.toml шаг добавлен), §2.3 (полная переработка HubertHFWrapper), §3 (этапы пересчитаны: iter-112 verification, iter-113 fork, iter-114 SoW, iter-115 A/B, iter-116 cleanup), §5 (риски обновлены), §7 (добавлены Путь E ultimate-rvc, Путь F inline, Путь G torchaudio), §9 (audit checklist 10→14 пунктов). KI#85 открыт в STATUS.md. |
-| Not done | Реализация (iter-113: форк + правки) — pending решения заказчика. |
-| Next step | Заказчик одобряет пересмотренный план → iter-113: форкнуть `daswer123/rvc-python@cff3ffb`, реализовать §2.3-2.5 + удалить fairseq из pyproject.toml. |
-| Active KIs | KI#83 (open), KI#85 (open — 6 ошибок iter-111 плана исправлены iter-112; будет закрыт после A/B-теста iter-115). |
+| Done | KI#86 открыт. `docs/fairseq_removal_plan.md` обновлён: §1.8 (новый, 52 строки), §3 (iter-113 шаги расширены), §5 (+2 риска), §8 (разблокировка KI#86), §9 (14→18 пунктов), header (история ревизий +1). Проверены все утверждения стороннего отчёта: Politrees/RVC_resources и lengyue233/content-vec-best — config.json байт-в-байт идентичны (та же модель, 378 МБ). Подтверждено: отчёт — это переоткрытие iter-112 плана с меньшей точностью. |
+| Not done | Реализация (iter-114: форк rvc-python + правки) — pending решения заказчика. |
+| Next step | Заказчик одобряет пересмотренный план → iter-114: форкнуть `daswer123/rvc-python@cff3ffb`, реализовать §2.3-2.5 + удалить fairseq из pyproject.toml + расслабить numpy/faiss пины (§1.8) + запустить verification script. |
+| Active KIs | KI#83 (open), KI#85 (open — 6 ошибок, ждёт A/B-test iter-116), KI#86 (open — 7-я ошибка, ждёт verification script iter-114). |
 
 ---
 
@@ -41,6 +44,7 @@
 
 | Iter | Date | KI(s) | Summary |
 |------|------|-------|---------|
+| 113-doc | 2026-08-06 | KI#86 | 7th error in iter-112 plan found via 3rd-party report cross-check: rvc-python pyproject pins `numpy<=1.23.5` + `faiss-cpu==1.7.3` — same dependency-trap as fairseq. Plan §1.8 + §3/§5/§8/§9 updated. Verified daswer123@cff3ffb + JarodMica@782467a both pin numpy/faiss identically (JarodMica only bumped omegaconf). |
 | 112 | 2026-08-06 | KI#85 | Verification of iter-111 plan against upstream: 6 errors found & fixed (wrong HF model facebook/hubert-base-ls960 → lengyue233/content-vec-best; plain HubertModel → HubertModelWithFinalProj; attention_mask type; pyproject.toml fairseq dep; JarodMica characterization; missed ultimate-rvc/zerorvc alternatives). |
 | 111 | 2026-08-06 | KI#83 | Plan fully revised: stub/monkey-patch → fork rvc-python + HF HuBERT (clean removal, no runtime crutches). |
 | 110 | 2026-08-06 | KI#65/70/71/73→CLOSED | Fork reset: 4 old KIs closed (out of scope). `fairseq_removal_plan.md` audited — 8 factual errors fixed. Doc-only. |
@@ -70,7 +74,6 @@
 | 86 | 2026-08-01 | KI#61-63 | Settings persistence atomicity; logging gap; installer.bat llama-server version check. |
 | 85 | 2026-08-01 | KI#59 | Cloud API provider fixes (cross-provider parity). |
 | 84 | 2026-08-01 | — | Cleanup stale smoke tests from iter-78/80. |
-| 83 | 2026-08-01 | — | DeepSeek provider parity. |
 
 ---
 
@@ -78,8 +81,9 @@
 
 | KI# | Severity | Description | Status |
 |-----|----------|-------------|--------|
-| KI#83 | BLOCKING | fairseq→HF ContentVec replacement. Plan полностью пересмотрен iter-111, верифицирован и исправлен iter-112 (KI#85). Реализация pending iter-113+ (форк daswer123/rvc-python@cff3ffb). | **OPEN** |
-| KI#85 | BLOCKING | 6 ошибок в iter-111 плане: (1) неверная HF-модель `facebook/hubert-base-ls960` вместо ContentVec; (2) plain HubertModel ломает v1; (3) attention_mask bool vs Long; (4) daswer123 pyproject.toml пинит fairseq; (5) JarodMica — активный форк; (6) пропущены ultimate-rvc/zerorvc. Все 6 исправлены в плане iter-112. Закроется после A/B-теста iter-115. | **OPEN** |
+| KI#83 | BLOCKING | fairseq→HF ContentVec replacement. Plan полностью пересмотрен iter-111, верифицирован и исправлен iter-112 (KI#85) + iter-113-doc (KI#86). Реализация pending iter-114+ (форк daswer123/rvc-python@cff3ffb). | **OPEN** |
+| KI#85 | BLOCKING | 6 ошибок в iter-111 плане: (1) неверная HF-модель `facebook/hubert-base-ls960` вместо ContentVec; (2) plain HubertModel ломает v1; (3) attention_mask bool vs Long; (4) daswer123 pyproject.toml пинит fairseq; (5) JarodMica — активный форк; (6) пропущены ultimate-rvc/zerorvc. Все 6 исправлены в плане iter-112. Закроется после A/B-теста iter-116. | **OPEN** |
+| KI#86 | BLOCKING | 7-я ошибка iter-112 плана (найдена iter-113-doc через сторонний отчёт): `pyproject.toml` rvc-python пинит `numpy<=1.23.5` и `faiss-cpu==1.7.3` — тот же dependency-trap pattern, что `fairseq==0.12.2`. SoW пинит `numpy==1.26.4` → resolver conflict или тихая установка несовместимой версии. Проверено: daswer123@cff3ffb и JarodMica@782467a пинят одинаково (JarodMica bumped только omegaconf). Решение: в форке relax `numpy<=1.23.5` → `numpy>=1.21,<3`, `faiss-cpu==1.7.3` → `faiss-cpu>=1.7,<2` + verification script в чистом venv. Закроется после verification script iter-114. | **OPEN** |
 
 ---
 

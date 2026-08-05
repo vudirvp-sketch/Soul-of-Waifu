@@ -1,6 +1,6 @@
-# План: полное удаление fairseq из Soul of Waifu (пересмотр iter-112)
+# План: полное удаление fairseq из Soul of Waifu (пересмотр iter-113-doc)
 
-**Дата**: 2026-08-06 (iter-112: верификация + 6 критических исправлений к iter-111 плану)
+**Дата**: 2026-08-06 (iter-113-doc: добавлен §1.8 + §5/§8/§9 правки для KI#86 — numpy/faiss dependency-trap)
 **Масштаб**: Deep (форк 3rd-party пакета + новый модуль + правки в text_to_speech.py + requirements.txt)
 **Путь**: A-clean — форк daswer123/rvc-python с заменой fairseq→HF ContentVec внутри форка
 
@@ -12,6 +12,7 @@
 - iter-110-audit: 8 фактических ошибок исправлено.
 - iter-111: полный пересмотр. Заказчик отказывается от stub'ов и monkey-patch'ей («не хочу костылей»). Новый подход: **форк rvc-python**, замена fairseq→HF HuBERT **внутри форка**.
 - **iter-112**: верификация iter-111 плана против upstream-репозиториев. Найдены 6 ошибок (KI#85): (1) HF-модель `facebook/hubert-base-ls960` НЕ ContentVec — это стандартный HuBERT для ASR, даёт неправильные фичи для RVC; (2) `HubertHFWrapper` использует plain `HubertModel` вместо `HubertModelWithFinalProj` → v1-модели ломаются; (3) `attention_mask=~padding_mask` возвращает bool, HF хочет LongTensor; (4) daswer123@0.1.5 pyproject.toml **пинит `fairseq==0.12.2`** — нужно удалить в форке; (5) JarodMica/rvc-python — активный форк (не «ноу-нейм»), last commit Mar 2026; (6) найдены 2 пропущенных fairseq-free альтернативы: `ultimate-rvc==0.6.0` (318★, MIT, `transformers==4.57.3` — точное совпадение с SoW) и `zerorvc==0.0.19`. Все 6 исправлены в этом пересмотре.
+- **iter-113-doc**: заказчик проверил iter-112 план через сторонний отчёт. Найдена 7-я ошибка (KI#86): iter-112 §1.7 упускает `numpy<=1.23.5` и `faiss-cpu==1.7.3` жёсткие пины в `pyproject.toml` rvc-python — тот же dependency-trap pattern, что и `fairseq==0.12.2`. SoW пинит `numpy==1.26.4`, rvc-python пинит `numpy<=1.23.5` → resolver conflict или тихая установка несовместимой версии. Без relaxation форк решит fairseq-симптом, но оставит класс проблемы. Добавлен §1.8 (KI#86), §3 iter-113 шаги расширены, §5/§8/§9 обновлены. Проверено через прямое клонирование daswer123@cff3ffb и JarodMica@782467a — оба пинят numpy/faiss одинаково (JarodMica bumped только omegaconf).
 
 ---
 
@@ -109,6 +110,59 @@ feats = model.final_proj(logits[0]) if version == "v1" else logits[0]
 - `fairseq==0.12.2` (requirements.txt:58) — **УДАЛИТЬ** (после переключения на форк).
 - `rvc-python @ git+https://github.com/JarodMica/rvc-python@9a67ac7...` (requirements.txt:191) — **ЗАМЕНИТЬ** на URL форка `daswer123/rvc-python` (рекомендуемая база) или форка от `JarodMica/rvc-python@HEAD`.
 - **В форке**: удалить `"fairseq==0.12.2"` из `pyproject.toml` dependencies (это для daswer123@0.1.5; JarodMica@HEAD уже не имеет этой строки).
+
+### 1.8. Зависимости-ловушки (KI#86, iter-113-doc)
+
+При верификации iter-112 (KI#85) упущен класс зависимостей, который воспроизводит ровно тот же «dependency-trap» pattern, что и `fairseq==0.12.2`: жёстко зафиксированные пины в `pyproject.toml` rvc-python, которые блокируют апгрейды дерева зависимостей SoW.
+
+**Фактическое состояние upstream `pyproject.toml`** (проверено прямым клонированием):
+
+| Пин | daswer123@cff3ffb (реком. база форка) | JarodMica@782467a (SoW pin) | SoW requirements.txt | Конфликт |
+|-----|---------------------------------------|------------------------------|----------------------|---------|
+| `fairseq==0.12.2` | **пинит** | нет | `fairseq==0.12.2` (line 58) | iter-112 KI#85 #4 (решается форком) |
+| `numpy<=1.23.5` | **пинит** | **пинит** (не bumped) | `numpy==1.26.4` (line 130) | **БЛОКИРУЕТ** — pip resolver падает или тихо ставит несовместимое |
+| `faiss-cpu==1.7.3` | **пинит** | **пинит** (не bumped) | `faiss-cpu==1.7.3` (line 59) | На сегодняшний день совпадает, но блокирует будущие апгрейды faiss |
+| `omegaconf==2.0.6` | **пинит** | `omegaconf==2.3.0` (bumped May 2025) | `omegaconf==2.3.0` (line 131) | Решено upstream'ом JarodMica |
+
+**Почему `numpy<=1.23.5` — критический блокер**:
+- SoW пинит `numpy==1.26.4` (May 2024, современная версия с поддержкой Python 3.12).
+- rvc-python пинит `numpy<=1.23.5` (August 2022 — версия двухлетней давности).
+- `pip install -r requirements.txt` с обоими пинами: либо resolver error, либо pip тихо ставит numpy 1.23.5 и ломает `transformers`, `scikit-learn`, `scipy`, `pandas` и ~15 других SoW-зависимостей, которые требуют `numpy>=1.24`.
+- Это **не гипотеза**: именно так fairseq ломал SoW в iter-107–iter-112. Удаление fairseq из requirements.txt без relaxing numpy-пина в rvc-python → ровно тот же сценарий, но с другим пакетом в роли блокера.
+
+**Контракт `faiss-cpu` в коде rvc-python** (проверено):
+- `rvc_python/modules/vc/pipeline.py:313`: `index = faiss.read_index(file_index)` — единственное использование.
+- `read_index` стабилен в API faiss-cpu с версии 1.7.0 до текущей 1.8.0. Жёсткий пин `==1.7.3` не имеет технического обоснования — это артефакт 2022 года.
+
+**Решение (в форке, на iter-113)**:
+
+В `pyproject.toml` форка:
+
+```diff
+- "numpy<=1.23.5",
+- "faiss-cpu==1.7.3",
++ "numpy>=1.21,<3",
++ "faiss-cpu>=1.7,<2",
+```
+
+**Почему эти диапазоны**:
+- `numpy>=1.21` — нижняя граница: самая старая версия, с которой код rvc-python реально работает (по `np.from_numpy`/`torch.from_numpy` паттернам, проверено в `pipeline.py`, `rmvpe.py`, `infer_pack/`). Верхняя `<3` — defensive guard против hypothetic numpy 3.0 breaking changes (на Aug 2026 numpy 2.x — latest).
+- `faiss-cpu>=1.7` — `read_index` стабилен с 1.7.0. `<2` — defensive guard.
+
+**Дополнительный шаг на iter-113**: после создания форка, до коммита в SoW, запустить verification:
+
+```bash
+# В чистом venv с Python 3.12:
+python -m venv /tmp/verify_rvc_fork
+source /tmp/verify_rvc_fork/bin/activate
+pip install "numpy==1.26.4" "transformers==4.57.3" "faiss-cpu==1.7.4" \
+            "git+https://github.com/vudirvp-sketch/rvc-python@<commit>"
+python -c "from rvc_python.infer import RVCInference; print('OK')"
+```
+
+Если `pip install` проходит без resolver conflict и импорт succeeds → KI#86 закрывается на iter-114 (A/B-тест). Если падает → расширить диапазоны или добавить missing dep в KI#86 followup.
+
+**История ревизий §1.8**: добавлено iter-113-doc (KI#86). iter-112 verification пропустил — фокус был на fairseq-removal correctness, не на dependency-tree health. KI#86 отдельный от KI#85, потому что это другой класс ошибок (upstream pin lock-in vs implementation correctness).
 
 ---
 
@@ -411,7 +465,7 @@ except ImportError:
 |------|------|-------|------|
 | **111** | Переписать план — полный пересмотр подхода (stub/monkey-patch → форк rvc-python). | docs только | 0 |
 | **112** | (Этот документ) Верификация iter-111 плана против upstream-репозиториев. Найдено 6 ошибок (KI#85): неверная HF-модель, plain HubertModel vs HubertModelWithFinalProj, attention_mask тип, fairseq в pyproject.toml форка, JarodMica — не «ноу-нейм», 2 пропущенных альтернативы. Все 6 исправлены в плане. | docs только | 0 |
-| **113** | Форкнуть `daswer123/rvc-python@cff3ffb` (v0.1.5) → `vudirvp-sketch/rvc-python`. В форке: переписать `modules/vc/utils.py` (§2.3), `lib/jit/get_hubert.py` (§2.4), `download_model.py` (§2.5), удалить `fairseq==0.12.2` из `pyproject.toml`. Запушить форк. | ~125 строк в 4 файлах | низкий — форк независим, можно тестировать отдельно |
+| **113** | Форкнуть `daswer123/rvc-python@cff3ffb` (v0.1.5) → `vudirvp-sketch/rvc-python`. В форке: переписать `modules/vc/utils.py` (§2.3), `lib/jit/get_hubert.py` (§2.4), `download_model.py` (§2.5), удалить `fairseq==0.12.2` из `pyproject.toml`, **расслабить `numpy<=1.23.5` → `numpy>=1.21,<3` и `faiss-cpu==1.7.3` → `faiss-cpu>=1.7,<2`** (§1.8, KI#86). Запустить verification script (§1.8). Запушить форк. | ~130 строк в 4 файлах | низкий — форк независим, можно тестировать отдельно |
 | **114** | SoW: удалить safe_globals-костыль из `text_to_speech.py:30-35`, заменить `rvc-python` на форк в `requirements.txt:191`, удалить `fairseq==0.12.2` из `requirements.txt:58`. | ~7 строк в 2 файлах | средний — требует переустановки env + верификации |
 | **115** | A/B-тест: генерация речи через форк (HF ContentVec) vs оригинальный rvc-python (fairseq ContentVec). Сравнение спектрограмм/слепое прослушивание. | тестовый скрипт | низкий |
 | **116** | Если A/B OK: обновить STATUS.md (закрыть KI#83, KI#85), AGENT_NAVIGATION.md (§4 Pitfalls + §1 line counts), worklog.md. Удалить старый `scripts/iter108_smoke_test.py` / `scripts/iter109_smoke_test.py` (больше не актуальны — тестировали monkey-patch подход). | docs/cleanup | 0 |
@@ -440,6 +494,8 @@ except ImportError:
 | `lib/jit/get_hubert.py` ONNX-экспорт не используется в SoW, но может понадобиться | низкая | Правка включена превентивно. Если ONNX-экспорт сломается — легко откатить только этот файл. |
 | `download_model.py` правка неполна — оригинальная логика скачивания rmvpe.pt не скопирована | средняя | На iter-113: скопировать оригинальную логику скачивания rmvpe.pt из upstream, только убрать hubert_base.pt. |
 | HF-кеш растёт: ContentVec ~370 МБ + возможные повторные скачивания | низкая | HF-кеш уже настроен в `text_to_speech.py:39-45` через `HF_HOME`/`HUGGINGFACE_HUB_CACHE` в `app/models/hf_cache`. |
+| (KI#86, iter-113-doc) Расслабление `numpy<=1.23.5` → `numpy>=1.21,<3` ломает rvc-python runtime на numpy 2.x | низкая | iter-113 verification script (§1.8) тестирует импорт в чистом venv с `numpy==1.26.4`. rvc-python использует только `np.from_numpy`/`torch.from_numpy` (нативный PyTorch interop, стабилен на numpy 1.x→2.x). Если падает — расширить нижнюю границу до `>=1.24` (выровнять с SoW). |
+| (KI#86) Расслабление `faiss-cpu==1.7.3` → `faiss-cpu>=1.7,<2` — `read_index` сломан в 1.8.x | очень низкая | `faiss.read_index` — part of stable C-API с 1.7.0. iter-113 verification script ставит `faiss-cpu==1.7.4` явно. Если падает — pin `faiss-cpu==1.7.4` (минимальный bump с сохранением совместимости). |
 
 ---
 
@@ -495,7 +551,7 @@ except ImportError:
 - **Подход**: форк rvc-python → замена fairseq→HF HuBERT внутри форка → SoW переключается на форк → fairseq удаляется из requirements.txt полностью.
 - **Сколько кода?** ~120 строк в 3 файлах форка + ~7 строк правок в SoW (удаление safe_globals + замена URL в requirements.txt + удаление fairseq).
 - **Какой риск?** Низкий. Форк — чистая замена, без runtime-костылей. GAP-A/GAP-B не существуют в этом подходе (fairseq просто нет в импорт-цепочке).
-- **Что разблокирует?** Python 3.12+, удаление `fairseq==0.12.2` (проблемная зависимость с conflict'ами на новых pip/setuptools), отсутствие технического долга от stub/monkey-patch.
+- **Что разблокирует?** Python 3.12+, удаление `fairseq==0.12.2` (проблемная зависимость с conflict'ами на новых pip/setuptools), отсутствие технического долга от stub/monkey-patch. **(KI#86, iter-113-doc)** Дополнительно: снятие dependency-trap с `numpy<=1.23.5` и `faiss-cpu==1.7.3` — те же жёсткие пины, что блокировали fairseq-апгрейды, только для numpy/faiss. Без relaxation форк решит fairseq-симптом, но оставит класс проблемы.
 - **Новый файл в SoW?** Нет. Обёртка встроена в форк.
 
 ---
@@ -516,3 +572,7 @@ except ImportError:
 12. **text_to_speech.py**: нет fairseq-импортов, нет safe_globals-костыля, нет stub'а, нет monkey-patch'а.
 13. **Приложение стартует без fairseq в env**: `python main.py` не падает с `ModuleNotFoundError: fairseq`.
 14. **HF ContentVec скачалась**: `app/models/hf_cache/` содержит `content-vec-best` (~370 МБ).
+15. **(KI#86, iter-113-doc) pyproject.toml форка не содержит жёстких пинов numpy/faiss**: grep → 0 совпадений `numpy<=1.23.5` и `faiss-cpu==1.7.3`. Заменены на `numpy>=1.21,<3` и `faiss-cpu>=1.7,<2`.
+16. **(KI#86) Verification script проходит**: `pip install "numpy==1.26.4" "transformers==4.57.3" "faiss-cpu==1.7.4" "git+...@fork"` в чистом venv Python 3.12 завершается без resolver conflict.
+17. **(KI#86) Импорт succeeds в verify-venv**: `python -c "from rvc_python.infer import RVCInference"` → `OK` без `ModuleNotFoundError` / `ImportError`.
+18. **(KI#86) SoW deps не сломаны**: после установки форка в venv, `pip install "scikit-learn==1.4.2" "scipy==1.13.1" "pandas==2.2.3"` проходят без conflict с rvc-python deps.

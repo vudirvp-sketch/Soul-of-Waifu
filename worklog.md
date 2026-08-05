@@ -2,6 +2,23 @@
 
 ---
 
+Task ID: iter-113-doc-ki86-numpy-faiss-dependency-trap
+Agent: Super Z (main)
+Task: Заказчик проверил iter-112 план через сторонний отчёт. Перепроверить каждое утверждение отчёта против реального кода, открыть KI#86 если найдены новые ошибки, обновить план.
+
+Work Log:
+- Перепроверен каждый пункт стороннего отчёта: 5 утверждений подтверждены (fairseq только в utils.py + get_hubert.py, lengyue233/content-vec-best существует, Politrees/RVC_resources содержит contentvec 378 МБ, API conversion `extract_features` → `hidden_states[N]`), 5 опровергнуты (утверждение «12 строк» — реально 4 места в 2 файлах; утверждение «нужно модифицировать pipeline.py» — wrapper эмулирует контракт, pipeline не трогается; утверждение «нужно проверить final_proj» — уже проверено iter-112 §1.5; утверждение про JarodMica «мёртвый импорт» — это не обёртка, а делегирование load_hubert→get_hubert_model).
+- Найдена 7-я ошибка iter-112 плана (KI#86): `pyproject.toml` rvc-python пинит `numpy<=1.23.5` + `faiss-cpu==1.7.3` — тот же dependency-trap pattern, что `fairseq==0.12.2`. SoW пинит `numpy==1.26.4` → resolver conflict или тихая установка несовместимой версии. iter-112 §1.7 упустил, фокус был на fairseq correctness, не на dependency-tree health.
+- Проверено через прямое клонирование: daswer123@cff3ffb и JarodMica@782467a — оба пинят `numpy<=1.23.5` + `faiss-cpu==1.7.3` одинаково. JarodMica bumped только omegaconf (2.0.6→2.3.0, May 2025). Подтверждено: JarodMica не решает проблему.
+- Проверено через HF API: Politrees/RVC_resources/embedders/transformers/contentvec/config.json байт-в-байт идентичен lengyue233/content-vec-best/config.json (та же модель, 378 МБ).
+- Обновлён `docs/fairseq_removal_plan.md`: добавлен §1.8 (52 строки, таблица upstream-пинов + объяснение + решение + verification script), §3 iter-113 шаги расширены (relax numpy/faiss + verification), §5 +2 риска (numpy 2.x compat, faiss-cpu 1.8.x compat), §8 разблокировка KI#86, §9 checklist 14→18 пунктов, header история ревизий +1 entry.
+- KI#86 открыт в STATUS.md. Housekeeping: worklog.md one-in-one-out — удалена iter-105 запись (самая старая); STATUS.md history table 31→30 строк (удалена iter-83).
+
+Stage Summary:
+- Doc-only. Files changed: `docs/fairseq_removal_plan.md`, `STATUS.md`, `worklog.md`. KI#86 OPEN, KI#83/85 unchanged. iter-114 (форк + реализация §2.3-2.5 + relax numpy/faiss + verification) — pending решения заказчика.
+
+---
+
 Task ID: iter-112-verification-6-errors-fixed
 Agent: Super Z (main)
 Task: Перепроверить iter-111 исследование полностью. Клонировать upstream-репозитории, верифицировать каждое утверждение, убедиться что решение «ультимативное со всех сторон».
@@ -151,19 +168,4 @@ Work Log:
 
 Stage Summary:
 - KI lifecycle: none opened/closed. Files changed: `docs/template_detection_pipeline_corrected.md` (new), STATUS.md, worklog.md. No code changes — doc-only iteration.
-
----
-
-Task ID: iter-105-ki82-close-model-limitation
-Agent: Super Z (main)
-Task: Analyze new 3-model logs (Llama-3-8B, Gemma-4, Qwen3.5) with iter-104 mitigation in effect. Close KI#82 if no technical pipeline bugs remain.
-
-Work Log:
-- Analyzed `sow_2026-08-01_23-21-22.log` + `llama_server_2026-08-01_23-21-22.log`: Llama-3-8B generated exactly 1273 tokens (=max_tokens), never emitted `<|eot_id|>` or `<|start_header_id|>`. Base model generates raw prose, no structural tokens.
-- Gemma-4-E4B: 886 tokens (250 text + 631 reasoning), proper in-character response. Qwen3.5-9B: 877 tokens (239 text + 635 reasoning), proper response. Both Instruct-tuned models work correctly.
-- iter-104 `<|start_header_id|>` stop token confirmed INEFFECTIVE for base model — it doesn't emit structural tokens at all. The stop token is still useful as defensive measure for Instruct models.
-- Confirmed: no technical pipeline bugs. Root cause = base model cannot follow "Avoid speaking and acting for {{user}}" instruction. KI#82 CLOSED as model limitation.
-
-Stage Summary:
-- KI#82 CLOSED. No code changes. Files changed: STATUS.md, worklog.md. `<|start_header_id|>` stop token retained in template_detector.py.
 
