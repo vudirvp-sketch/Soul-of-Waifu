@@ -1,0 +1,176 @@
+# ============================================================
+# Soul of Waifu — .gitignore
+#
+# ВАЖНО: многие папки содержат .gitkeep (маркеры для git).
+# Эти папки ДОЛЖНЫ оставаться в репо пустыми (для installer.bat,
+# для soul_memory runtime, для пользовательского контента).
+# Поэтому используем паттерн:
+#     folder/*
+#     !folder/.gitkeep
+# НЕ удаляй .gitkeep файлы и НЕ меняй паттерн на просто "folder/".
+# ============================================================
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+build/
+develop-eggs/
+dist/
+downloads/
+parts/
+sdist/
+var/
+wheels/
+*.egg
+MANIFEST
+
+# ---- Виртуальные окружения ----
+venv/
+env/
+.venv/
+env*/
+
+# ---- Miniconda env (~1.5GB) — keep .gitkeep ----
+app/data/*
+!app/data/.gitkeep
+
+# ---- Runtime caches — keep .gitkeep ----
+app/cache/*
+!app/cache/.gitkeep
+
+# ---- RVC voice models (user content) — keep .gitkeep ----
+app/voices/*
+!app/voices/.gitkeep
+
+# ---- ffmpeg binaries (downloaded by installer) — keep .gitkeep ----
+app/ffmpeg/*
+!app/ffmpeg/.gitkeep
+
+# ---- Fonts (downloaded by installer) — keep .gitkeep ----
+app/font/*
+!app/font/.gitkeep
+
+# ---- Soul Memory runtime data (CRITICAL: user's character data) ----
+# Character psychology, relationships, diary, topics — PRIVATE.
+.soul/
+
+# ---- Soul Companion plugins (user content) — keep .gitkeep ----
+app/utils/soul_companion/plugins/*
+!app/utils/soul_companion/plugins/.gitkeep
+
+# ---- User-downloaded LLM models — keep .gitkeep ----
+assets/local_llm/*
+!assets/local_llm/.gitkeep
+
+# ---- User RVC voice models — keep .gitkeep ----
+assets/rvc_models/*
+!assets/rvc_models/.gitkeep
+
+# ---- User ambient audio loops — keep .gitkeep ----
+assets/ambient/*
+!assets/ambient/.gitkeep
+
+# ---- User chat backgrounds — keep .gitkeep ----
+assets/backgrounds/*
+!assets/backgrounds/.gitkeep
+
+# ---- User avatar assets — keep .gitkeep ----
+assets/emotions/images/*
+!assets/emotions/images/.gitkeep
+assets/emotions/live2d/*
+!assets/emotions/live2d/.gitkeep
+assets/emotions/vrm/*
+!assets/emotions/vrm/.gitkeep
+
+# ---- Logs — keep .gitkeep ----
+logs/*
+!logs/.gitkeep
+*.log
+
+# ---- Конфиги с секретами ----
+# ВАЖНО: api.json хранится в репо с ПУСТЫМИ значениями (нужно для дефолта).
+# Файл НЕ в .gitignore. ПЕРЕД КАЖДЫМ КОММИТОМ проверяй:
+#   git diff app/configuration/api.json
+# Все *_API_TOKEN / *_BOT_TOKEN поля должны быть "".
+# Если случайно закоммитил заполненный — см. SECURITY.md.
+api.local.json
+*.local.json
+.env
+.env.*
+secrets.json
+
+# ---- Пользовательские локальные конфиги ----
+app/configuration/settings.local.json
+app/configuration/characters.local.json
+
+# ---- Модели и downloaded артефакты ----
+# Defense-in-depth: даже если installer.bat скачает файл в новое место,
+# эти паттерны поймают его. iter-2 добавил *.pt, *.dll, *.pyd, *.lib, *.pdb, *.wasm, *.exe
+# (раньше был только *.pth — пропускал hubert_base.pt 181MB, rmvpe.pt 173MB).
+*.gguf
+*.bin
+*.safetensors
+*.pth
+*.pt
+*.onnx
+*.ckpt
+*.dll
+*.pyd
+*.lib
+*.pdb
+*.wasm
+*.exe
+models/
+hf_cache/
+huggingface/
+
+# ---- LLM backends (llama.cpp binaries, downloaded by backend_updater.py) ----
+# Contains: cpu/, cuda/, vulkan/, hip/, sycl/ + _backup/, _update_cache/, _temp/
+# Heavy: ggml-cuda.dll 539MB, cublasLt64_12.dll 452MB, ggml-vulkan.dll 56MB, llama-server-impl.dll 15MB×3
+app/utils/ai_clients/backend/
+
+# ---- Embedding model (loaded by prompt_engine.py via SentenceTransformer) ----
+# Heavy: model.safetensors ~87MB. Already covered by *.safetensors but explicit for clarity.
+app/utils/all-MiniLM-L6-v2/
+
+# ---- Emotion detector model (downloaded at runtime) ----
+# Heavy: pytorch_model.bin ~256MB. Already covered by *.bin but explicit for clarity.
+app/utils/emotions/detector/
+
+# ---- IDE / редакторы ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ---- Временные файлы агентов ----
+worklog.local.md
+TODO.local.md
+*.tmp
+*.bak
+
+# ---- Тестовые запуски ----
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- Playwright (если будут UI-тесты) ----
+playwright-report/
+test-results/
