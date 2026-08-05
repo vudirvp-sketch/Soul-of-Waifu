@@ -11,25 +11,29 @@
 
 ---
 
-## Iteration 111: полный пересмотр плана удаления fairseq
+## Iteration 112: верификация iter-111 плана — 6 критических ошибок найдено и исправлено
 
 **Date**: 2026-08-06
 **Scale**: Normal. Doc-only — no code changes. 3 files: `STATUS.md`, `worklog.md`, `docs/fairseq_removal_plan.md`.
 
-**Task**: Заказчик отказывается от stub/monkey-patch подхода (iter-107→110). Требование: «не хочу костылей и остатков fairseq — с корнем убрать». Полный пересмотр `docs/fairseq_removal_plan.md`: вместо stub `sys.modules['fairseq']` + dual-target monkey-patch → **форк rvc-python** с заменой fairseq→HF HuBERT внутри форка.
+**Task**: Заказчик попросил перепроверить всё исследование iter-111, убедиться что решение «ультимативное со всех сторон». Клонированы и проверены upstream-репозитории: daswer123/rvc-python (PyPI upstream), JarodMica/rvc-python (текущий SoW pin), RVC-Project/Retrieval-based-Voice-Conversion-WebUI (official), JackismyShephard/ultimate-rvc (пропущенная альтернатива). Проверены 3 HF-модели, 6 PyPI-пакетов rvc, контракт extract_features.
 
-**Изменение подхода**:
-- Старый план (Путь D): stub `sys.modules` + monkey-patch `load_hubert` в двух namespace + отдельный файл `rvc_hubert_hf.py` + GAP-A/B runtime-костыли.
-- Новый план (Путь A-clean): форк `JarodMica/rvc-python` → переписать `modules/vc/utils.py` (заменить `from fairseq import checkpoint_utils` на `transformers.HubertModel`) + `lib/jit/get_hubert.py` + `download_model.py` → SoW переключается на форк → `fairseq==0.12.2` удаляется из `requirements.txt` → safe_globals-костыль удаляется из `text_to_speech.py`. Никаких runtime-костылей.
+**Найдено 6 ошибок в iter-111 плане** (KI#85 открыт):
+1. **HF-модель**: iter-111 указывал `facebook/hubert-base-ls960` (стандартный HuBERT для ASR). RVC обучен против ContentVec — стандартный HuBERT даёт неправильные фичи. Исправлено: `lengyue233/content-vec-best` (ContentVec в HF формате).
+2. **HubertHFWrapper**: iter-111 использовал plain `HubertModel` → `final_proj` выбрасывал RuntimeError → ломал v1-модели. Исправлено: наследует `HubertModelWithFinalProj` (3-строчный подкласс из официального RVC `infer/hubert.py`), загружает `final_proj` веса из ContentVec.
+3. **attention_mask**: iter-111 передавал `~padding_mask` (bool tensor) в HF. Исправлено: `(~padding_mask.bool()).long()` (LongTensor, 1=real token) — каноничный паттерн из официального RVC.
+4. **pyproject.toml форка**: iter-111 утверждал «rvc-python НЕ перечисляет fairseq в зависимостях». Это верно для JarodMica@9a67ac7 (SoW pin), но НЕверно для daswer123@0.1.5 (рекомендованная база форка) — там `fairseq==0.12.2` явно пинит. Добавлен шаг: удалить `"fairseq==0.12.2"` из `pyproject.toml` в форке.
+5. **JarodMica characterization**: iter-111 исследование называло JarodMica/rvc-python «ноу-нейм форк (12★)». Реальность: активный форк, last commit Mar 2026, автор вносил правки (May 2025 «fix hubert issues», Mar 2026 «Update library to change where sources are downloaded from»). Не «ноу-нейм».
+6. **Пропущенные альтернативы**: найдено 2 fairseq-free пакета на PyPI: `ultimate-rvc==0.6.0` (318★, MIT, `transformers==4.57.3` — точное совпадение с SoW, Python 3.12+) и `zerorvc==0.0.19`. Ultimate-rvc отклонён как drop-in replacement (приносит ~30 тяжёлых deps, другой API), но его `HubertModelWithFinalProj` + `load_embedding` код использован как референс.
 
 ### Stop point
 
 | Field | Value |
 |-------|-------|
-| Done | `docs/fairseq_removal_plan.md` полностью переписан (9 разделов, ~300 строк). Подход: форк rvc-python + HF HuBERT. Нет stub'ов, нет monkey-patch'ей, нет GAP-A/B. Этапы: iter-112 (форк + правки), iter-113 (SoW: requirements.txt + text_to_speech.py), iter-114 (A/B-тест), iter-115 (cleanup docs). |
-| Not done | KI#83 implementation (создание форка + правки кода). AGENT_NAVIGATION.md §1 line counts stale (5 entries). |
-| Next step | iter-112: форкнуть `JarodMica/rvc-python` → `vudirvp-sketch/rvc-python`, переписать 3 файла, запушить. iter-113: SoW переключение на форк + удаление fairseq. |
-| Active KIs | KI#83 (open — подход изменён на форк rvc-python; план переписан iter-111, реализация pending iter-112+) |
+| Done | Верификация завершена. 6 ошибок найдено и исправлено в `docs/fairseq_removal_plan.md`: §1.1 (правильное описание зависимостей daswer123 vs JarodMica), §1.5 (ContentVec вместо стандартного HuBERT), §1.6 (v1+v2 контракт через HubertModelWithFinalProj), §1.7 (pyproject.toml шаг добавлен), §2.3 (полная переработка HubertHFWrapper), §3 (этапы пересчитаны: iter-112 verification, iter-113 fork, iter-114 SoW, iter-115 A/B, iter-116 cleanup), §5 (риски обновлены), §7 (добавлены Путь E ultimate-rvc, Путь F inline, Путь G torchaudio), §9 (audit checklist 10→14 пунктов). KI#85 открыт в STATUS.md. |
+| Not done | Реализация (iter-113: форк + правки) — pending решения заказчика. |
+| Next step | Заказчик одобряет пересмотренный план → iter-113: форкнуть `daswer123/rvc-python@cff3ffb`, реализовать §2.3-2.5 + удалить fairseq из pyproject.toml. |
+| Active KIs | KI#83 (open), KI#85 (open — 6 ошибок iter-111 плана исправлены iter-112; будет закрыт после A/B-теста iter-115). |
 
 ---
 
@@ -37,6 +41,7 @@
 
 | Iter | Date | KI(s) | Summary |
 |------|------|-------|---------|
+| 112 | 2026-08-06 | KI#85 | Verification of iter-111 plan against upstream: 6 errors found & fixed (wrong HF model facebook/hubert-base-ls960 → lengyue233/content-vec-best; plain HubertModel → HubertModelWithFinalProj; attention_mask type; pyproject.toml fairseq dep; JarodMica characterization; missed ultimate-rvc/zerorvc alternatives). |
 | 111 | 2026-08-06 | KI#83 | Plan fully revised: stub/monkey-patch → fork rvc-python + HF HuBERT (clean removal, no runtime crutches). |
 | 110 | 2026-08-06 | KI#65/70/71/73→CLOSED | Fork reset: 4 old KIs closed (out of scope). `fairseq_removal_plan.md` audited — 8 factual errors fixed. Doc-only. |
 | 109 | 2026-08-04 | KI#84→CLOSED | Fix: KI#80 placeholder-strip broke Mistral-family templates (HTTP 400 `roles must alternate`). Added `CapabilityMap.requires_role_alternation`; strip is NO-OP when True. Smoke 18 PASS. Main-line, not in this fork. |
@@ -73,7 +78,8 @@
 
 | KI# | Severity | Description | Status |
 |-----|----------|-------------|--------|
-| KI#83 | BLOCKING | fairseq→HF HuBERT replacement. Plan полностью пересмотрен iter-111: подход изменён с stub/monkey-patch на **форк rvc-python** (чистое удаление fairseq без runtime-костылей). Реализация pending iter-112+. | **OPEN** |
+| KI#83 | BLOCKING | fairseq→HF ContentVec replacement. Plan полностью пересмотрен iter-111, верифицирован и исправлен iter-112 (KI#85). Реализация pending iter-113+ (форк daswer123/rvc-python@cff3ffb). | **OPEN** |
+| KI#85 | BLOCKING | 6 ошибок в iter-111 плане: (1) неверная HF-модель `facebook/hubert-base-ls960` вместо ContentVec; (2) plain HubertModel ломает v1; (3) attention_mask bool vs Long; (4) daswer123 pyproject.toml пинит fairseq; (5) JarodMica — активный форк; (6) пропущены ultimate-rvc/zerorvc. Все 6 исправлены в плане iter-112. Закроется после A/B-теста iter-115. | **OPEN** |
 
 ---
 

@@ -2,6 +2,24 @@
 
 ---
 
+Task ID: iter-112-verification-6-errors-fixed
+Agent: Super Z (main)
+Task: Перепроверить iter-111 исследование полностью. Клонировать upstream-репозитории, верифицировать каждое утверждение, убедиться что решение «ультимативное со всех сторон».
+
+Work Log:
+- Клонированы 4 репозитория: daswer123/rvc-python@0.1.5 (PyPI upstream, MIT, last Oct 2024, pyproject pinит `fairseq==0.12.2`), JarodMica/rvc-python@9a67ac7 (SoW pin) + @HEAD (last Mar 2026, активный форк, fairseq REMOVED из pyproject но остался в коде), RVC-Project/Retrieval-based-Voice-Conversion-WebUI@81eed5e (official, last Aug 2026, ZERO fairseq refs, migration commit `5d47da1` 2026-07-19 «Import RVC 20260716»), JackismyShephard/ultimate-rvc@e6519bc (318★, MIT, last Apr 2026, `transformers==4.57.3` совпадает с SoW, fairseq-free).
+- Сравнены 3 HF-модели через их config.json: (1) `facebook/hubert-base-ls960` — plain HubertModel, NO classifier_proj_size, NO final_proj (ASR model, НЕ ContentVec). (2) `lengyue233/content-vec-best` — HubertModelWithFinalProj, classifier_proj_size=256, INCLUDES final_proj веса (ContentVec). (3) `lj1995/VoiceConversionWebUI/hubert_base` — то же ContentVec, используется официальным RVC. iter-111 план указывал (1) — ОШИБКА, исправлено на (2).
+- Проверен контракт extract_features: официальный RVC `infer/hubert.py` явно комментирует «Transformers hidden_states[N] is numerically equivalent to the source checkpoint's output_layer=N». v1 → hidden_states[9] + final_proj. v2 → last_hidden_state (== hidden_states[12]). iter-111 план этот контракт описал правильно.
+- Найдено 2 пропущенных PyPI-пакета: `ultimate-rvc==0.6.0` (318★, MIT, fairseq-free, `transformers==4.57.3` совпадает с SoW, но приносит 30+ тяжёлых deps — gradio, audio-separator, yt-dlp, etc.); `zerorvc==0.0.19` (no fairseq, no transformers — отдельное решение). Оба отклонены как drop-in replacement, но ultimate-rvc код использован как референс.
+- Все 4 ранее проверенных PyPI-пакета (daswer123, R3gm, Thatneos, rvc-infer) — всё ещё на fairseq, версии не вышли.
+- Применено 6 правок к `docs/fairseq_removal_plan.md`: §1.1 (daswer123 pyproject pinит fairseq, JarodMica — активный форк), §1.5 (ContentVec вместо стандартного HuBERT), §1.6 (v1+v2 контракт через HubertModelWithFinalProj), §1.7 (pyproject.toml шаг добавлен), §2.3 (полная переработка HubertHFWrapper — HubertModelWithFinalProj + правильный attention_mask), §3 (этапы пересчитаны iter-112→iter-116), §5 (риски обновлены), §7 (Путь E ultimate-rvc, Путь F inline, Путь G torchaudio), §9 (audit checklist 10→14 пунктов).
+- KI#85 открыт в STATUS.md. Housekeeping: worklog.md one-in-one-out — удалена iter-104 запись (самая старая).
+
+Stage Summary:
+- Doc-only. Files changed: `docs/fairseq_removal_plan.md`, `STATUS.md`, `worklog.md`. No code changes. iter-113 (форк daswer123 + реализация §2.3-2.5 + pyproject fix) — pending решения заказчика.
+
+---
+
 Task ID: iter-111-plan-revision-fork-approach
 Agent: Super Z (main)
 Task: Полный пересмотр плана удаления fairseq. Заказчик отказывается от stub/monkey-patch подхода — требует чистого удаления «с корнем».
@@ -13,7 +31,7 @@ Work Log:
 - Обновил STATUS.md: iter-111 header, KI#83 описание обновлено, history +1/-2 (trim to 30 rows).
 
 Stage Summary:
-- Doc-only. Files changed: `docs/fairseq_removal_plan.md`, `STATUS.md`, `worklog.md`. No code changes. Plan ready for iter-112 (fork rvc-python + implement HF HuBERT).
+- Doc-only. Files changed: `docs/fairseq_removal_plan.md`, `STATUS.md`, `worklog.md`. No code changes. Plan ready for iter-112 (верификация → форк rvc-python + implement HF HuBERT).
 
 ---
 
@@ -149,19 +167,3 @@ Work Log:
 Stage Summary:
 - KI#82 CLOSED. No code changes. Files changed: STATUS.md, worklog.md. `<|start_header_id|>` stop token retained in template_detector.py.
 
----
-
-Task ID: iter-104-ki82-verify-stop-template-add-header-stop
-Agent: Super Z (main)
-Task: Verify stop words + chat template for KI#82 before accepting "weak model + bad system prompt" hypothesis. Implement iter-103 mitigation #1 if verification passes.
-
-Work Log:
-- Verified stop words: `['<|eot_id|>']` correct for Llama-3, source=gguf+template_implied (tier 3). max_tokens=828 < 1377 → model cut off before natural EOS.
-- Verified chat template: GGUF-embedded Llama-3 (source=embedded, confidence=high). KI#79 pre-tokenizer override applied. KI#80 placeholder stripping works (4→3 msgs). System merge works (2→1).
-- Verified reasoning: KI#75 `--reasoning off` FORCED correctly. `reasoning: mode=ON` in log is a logging bug (iter-103 noted).
-- Found contributing factors: system prompt frames task as "neverending story" + `top_p=0.7` too low + DRY params for Coding not creative writing + model is BASE (name='.', eos=[128001] only).
-- Code: `template_detector.py:_TEMPLATE_IMPLIED_STOPS['llama-3']` → added `<|start_header_id|>` as secondary stop word (iter-103 mitigation #1). Catches role-bleed when model emits new turn header.
-- Conclusion: user hypothesis CONFIRMED — stop/template pipeline has NO bugs, root cause = base model + system prompt framing.
-
-Stage Summary:
-- KI#82 mitigation #1 applied. Files changed: template_detector.py, STATUS.md, worklog.md. Awaiting user test with Instruct model.

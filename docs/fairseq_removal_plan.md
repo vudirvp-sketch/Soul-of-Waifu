@@ -1,8 +1,8 @@
-# План: полное удаление fairseq из Soul of Waifu (пересмотр iter-111)
+# План: полное удаление fairseq из Soul of Waifu (пересмотр iter-112)
 
-**Дата**: 2026-08-06 (полный пересмотр: отказ от stub/monkey-patch, форк rvc-python)
+**Дата**: 2026-08-06 (iter-112: верификация + 6 критических исправлений к iter-111 плану)
 **Масштаб**: Deep (форк 3rd-party пакета + новый модуль + правки в text_to_speech.py + requirements.txt)
-**Путь**: A-clean — форк rvc-python с заменой fairseq→HF HuBERT внутри форка
+**Путь**: A-clean — форк daswer123/rvc-python с заменой fairseq→HF ContentVec внутри форка
 
 **Принцип**: никаких stub'ов `sys.modules`, никаких monkey-patch'ей поверх rvc-python, никаких остатков fairseq. Удалить с корнем.
 
@@ -10,7 +10,8 @@
 - iter-107: первичный план (8 разделов, путь A — monkey-patch).
 - iter-107-audit: GAP-A/GAP-B найдены, добавлены stub + dual-target monkey-patch.
 - iter-110-audit: 8 фактических ошибок исправлено.
-- **iter-111**: полный пересмотр. Заказчик отказывается от stub'ов и monkey-patch'ей («не хочу костылей»). Новый подход: **форк rvc-python**, замена fairseq→HF HuBERT **внутри форка**. fairseq удаляется полностью — из requirements.txt, из кода, из sys.modules. Никаких runtime-костылей.
+- iter-111: полный пересмотр. Заказчик отказывается от stub'ов и monkey-patch'ей («не хочу костылей»). Новый подход: **форк rvc-python**, замена fairseq→HF HuBERT **внутри форка**.
+- **iter-112**: верификация iter-111 плана против upstream-репозиториев. Найдены 6 ошибок (KI#85): (1) HF-модель `facebook/hubert-base-ls960` НЕ ContentVec — это стандартный HuBERT для ASR, даёт неправильные фичи для RVC; (2) `HubertHFWrapper` использует plain `HubertModel` вместо `HubertModelWithFinalProj` → v1-модели ломаются; (3) `attention_mask=~padding_mask` возвращает bool, HF хочет LongTensor; (4) daswer123@0.1.5 pyproject.toml **пинит `fairseq==0.12.2`** — нужно удалить в форке; (5) JarodMica/rvc-python — активный форк (не «ноу-нейм»), last commit Mar 2026; (6) найдены 2 пропущенных fairseq-free альтернативы: `ultimate-rvc==0.6.0` (318★, MIT, `transformers==4.57.3` — точное совпадение с SoW) и `zerorvc==0.0.19`. Все 6 исправлены в этом пересмотре.
 
 ---
 
@@ -36,7 +37,11 @@ except ImportError:
 | `modules/vc/utils.py:2` | `from fairseq import checkpoint_utils` | Загрузка `hubert_base.pt` через `checkpoint_utils.load_model_ensemble_and_task` |
 | `lib/jit/get_hubert.py:4,5` | `from fairseq.checkpoint_utils import load_model_ensemble_and_task` + `from fairseq.utils import index_put` | ONNX/JIT-экспорт HuBERT |
 
-**rvc-python НЕ перечисляет fairseq в своих зависимостях** (ни в `pyproject.toml`, ни в `requirements.txt`). fairseq — неявная зависимость, которая в SoW-окружение попадает только через `requirements.txt:58`.
+**关于 зависимости rvc-python от fairseq — два разных upstream, два разных состояния** (исправлено iter-112, KI#85):
+- **daswer123/rvc-python@0.1.5** (PyPI, recommended fork base): **пинит `fairseq==0.12.2`** в `pyproject.toml` dependencies. Форк **обязан** удалить эту строку.
+- **JarodMica/rvc-python@9a67ac7** (текущий pin в SoW `requirements.txt:191`): fairseq уже удалён из `pyproject.toml` (commit `0caaf86` May 2025 «fix hubert issues»), но fairseq-импорты в коде остались. JarodMica — активный форк (last commit Mar 2026), не «ноу-нейм».
+
+В SoW-окружение fairseq попадает через `requirements.txt:58` (явный pin) + rvc-python@9a67ac7 imports его в runtime (implicit).
 
 ### 1.2. Импорт-цепочка (GAP-A)
 
@@ -71,28 +76,39 @@ feats = model.final_proj(logits[0]) if version == "v1" else logits[0]
 2. `model.final_proj(feats)` — **только для RVC v1**
 3. `model.eval()`, `model.to(device)`, `model.half()`/`.float()` — стандартные `nn.Module` методы
 
-### 1.5. HF-модель: `facebook/hubert-base-ls960`
+### 1.5. HF-модель: `lengyue233/content-vec-best` (ContentVec, НЕ стандартный HuBERT)
 
-- 889,944 скачиваний на HuggingFace Hub.
-- Архитектурно идентичен `hubert_base.pt`:
-  - `num_hidden_layers: 12`, `hidden_size: 768`
-  - `do_stable_layer_norm: false` → соответствует fairseq `layer_norm_first=False`
-- Веса сконвертированы из того же fairseq-чекпойнта официальным скриптом.
-- **НЕ включает `final_proj`** (pretraining-only head, в HF-модели отсутствует).
+**Исправлено iter-112 (KI#85)**: iter-111 план указывал `facebook/hubert-base-ls960` — это **стандартный HuBERT для ASR**, а не ContentVec. RVC обучен против ContentVec (variant legacy-500), и загрузка стандартного HuBERT даёт неправильные фичи (issues RVC-Boss #2078, #2121 — подтверждено автором RVC).
 
-### 1.6. v1 vs v2
+**Правильная модель**: `lengyue233/content-vec-best`
+- Конвертирована из `content-vec-best-legacy-500.pt` (official ContentVec от auspicious3000).
+- `architectures: ["HubertModelWithFinalProj"]` (включая `final_proj` веса).
+- `classifier_proj_size: 256` (final_proj: 768→256, для RVC v1).
+- `num_hidden_layers: 12`, `hidden_size: 768`, `do_stable_layer_norm: false`.
+- Лицензия: MIT.
+- Альтернативный источник (тот же ContentVec): `lj1995/VoiceConversionWebUI/hubert_base` — используется официальным RVC-Project.
+
+**Эталонная имплементация** (официальный RVC, `infer/hubert.py`, commit `5d47da1` 2026-07-19): использует ровно эту модель (через `HubertModelWithFinalProj` подкласс) — proven, MIT-лицензированный код от самих авторов RVC.
+
+### 1.6. v1 vs v2 (уточнено iter-112)
 
 - `rvc_python/infer.py:65`: `load_model(model_name, version="v2")` — **по умолчанию v2**.
 - `text_to_speech.py:198` вызывает `self.rvc.load_model(model_name)` без указания version → v2.
-- Для v2 `final_proj` **НЕ нужен** (`pipeline.py:223`: `feats = logits[0]`).
+- Для v2 `final_proj` **НЕ нужен** — используется `last_hidden_state` (== `hidden_states[12]`).
+- Для v1 `final_proj` **нужен** — `hidden_states[9]` → `final_proj` → 256-dim. Исправлено iter-112: обёртка теперь наследует `HubertModelWithFinalProj`, чтобы v1-модели работали (раньше iter-111 план ломал v1).
 
-**Вывод**: HF-модели без `final_proj` достаточно для всех сценариев SoW.
+**Контракт extract_features** (верифицировано официальным RVC `infer/hubert.py` комментарием: *«Transformers hidden_states[N] is numerically equivalent to the source checkpoint's output_layer=N for this converted checkpoint»*):
+- `fairseq extract_features(output_layer=N)` 1-based → `HF outputs.hidden_states[N]` 1-based equivalent.
+- `hidden_states[9]` == fairseq layer 9 output (для v1).
+- `hidden_states[12]` == `last_hidden_state` (для v2).
+- `padding_mask` (bool, True=padded) → HF `attention_mask = (~padding_mask.bool()).long()` (Long, 1=real token).
 
 ### 1.7. Зависимости
 
-- `transformers==4.57.3` **уже в requirements.txt:235** — ничего добавлять.
+- `transformers==4.57.3` **уже в requirements.txt:235** — ничего добавлять. Версия подтверждена совместимой с HF HuBERT подходом: `ultimate-rvc==0.6.0` (318★, MIT) использует ровно `transformers==4.57.3`.
 - `fairseq==0.12.2` (requirements.txt:58) — **УДАЛИТЬ** (после переключения на форк).
-- `rvc-python @ git+https://github.com/JarodMica/rvc-python@9a67ac7...` (requirements.txt:191) — **ЗАМЕНИТЬ** на URL форка.
+- `rvc-python @ git+https://github.com/JarodMica/rvc-python@9a67ac7...` (requirements.txt:191) — **ЗАМЕНИТЬ** на URL форка `daswer123/rvc-python` (рекомендуемая база) или форка от `JarodMica/rvc-python@HEAD`.
+- **В форке**: удалить `"fairseq==0.12.2"` из `pyproject.toml` dependencies (это для daswer123@0.1.5; JarodMica@HEAD уже не имеет этой строки).
 
 ---
 
@@ -155,36 +171,66 @@ def get_index_path_from_model(sid):
     )
 
 
+# Портировано из официального RVC infer/hubert.py (commit 5d47da1, 2026-07-19, MIT).
+# Использует lengyue233/content-vec-best (ContentVec, НЕ стандартный HuBERT).
+
+from transformers import HubertModel
+
+
+class HubertModelWithFinalProj(HubertModel):
+    """HF HuBERT с final_proj (768→256) для RVC v1-совместимости.
+
+    Тот же класс, что в официальном RVC infer/hubert.py и в
+    lengyue233/content-vec-best README. Загружает final_proj веса
+    из `pytorch_model.bin` ContentVec-модели.
+    """
+    def __init__(self, config):
+        super().__init__(config)
+        self.final_proj = torch.nn.Linear(
+            config.hidden_size, config.classifier_proj_size
+        )
+
+
 class HubertHFWrapper(torch.nn.Module):
-    """HF HuBERT (facebook/hubert-base-ls960), эмулирующий fairseq-контракт.
+    """Обёртка над HubertModelWithFinalProj, эмулирующая fairseq-контракт.
 
     Воспроизводит интерфейс fairseq HuBERT:
       - extract_features(source, padding_mask, output_layer) → (feats, padding_mask)
-      - final_proj(feats) — заглушка для v1-совместимости (выбрасывает RuntimeError)
+      - final_proj(feats) — делегирует в HubertModelWithFinalProj.final_proj
+        (v1: hidden_states[9] → final_proj → 256-dim)
       - .eval(), .to(device), .half()/.float() — стандартные nn.Module
     """
 
-    DEFAULT_HF_MODEL_ID = "facebook/hubert-base-ls960"
+    DEFAULT_HF_MODEL_ID = "lengyue233/content-vec-best"
 
     def __init__(self, hf_model_id=None, device="cpu", is_half=False):
         super().__init__()
-        from transformers import HubertModel
-
         model_id = hf_model_id or self.DEFAULT_HF_MODEL_ID
-        self.model = HubertModel.from_pretrained(model_id).to(device)
-        if is_half:
-            self.model = self.model.half()
-        else:
-            self.model = self.model.float()
+        dtype = torch.float16 if is_half else torch.float32
+        self.model = HubertModelWithFinalProj.from_pretrained(
+            model_id, torch_dtype=dtype
+        ).to(device)
         self.model.eval()
         self._hf_model_id = model_id
 
     def extract_features(self, source, padding_mask=None, output_layer=None,
                          mask=False, ret_conv=False):
-        """Возвращает (feats, padding_mask) — как fairseq HuBERT.extract_features."""
+        """Возвращает (feats, padding_mask) — как fairseq HuBERT.extract_features.
+
+        Контракт (верифицирован официальным RVC infer/hubert.py, KI#85 fix):
+          fairseq extract_features(output_layer=N) 1-based
+          ↔ HF outputs.hidden_states[N] 1-based equivalent.
+          hidden_states[9]  → layer 9 output (для v1)
+          hidden_states[12] → last_hidden_state (для v2)
+        """
+        # padding_mask: bool tensor (True = padded) → attention_mask: LongTensor (1 = real token)
+        attention_mask = None
+        if padding_mask is not None:
+            attention_mask = (~padding_mask.bool()).long()
+
         outputs = self.model(
             input_values=source,
-            attention_mask=~padding_mask if padding_mask is not None else None,
+            attention_mask=attention_mask,
             output_hidden_states=True,
         )
         if output_layer is not None:
@@ -194,51 +240,45 @@ class HubertHFWrapper(torch.nn.Module):
         return feats, padding_mask
 
     def final_proj(self, feats):
-        """Заглушка — HF HuBERT не включает final_proj (pretraining-only head).
+        """Делегирует в HubertModelWithFinalProj.final_proj (v1 support).
 
-        RVC v2 (дефолт в SoW) не вызывает этот метод.
-        Если v1-модель попытается вызвать — понятный RuntimeError.
+        В отличие от iter-111 плана (который выбрасывал RuntimeError),
+        теперь v1-модели работают: final_proj веса загружены из
+        lengyue233/content-vec-best (classifier_proj_size=256).
         """
-        raise RuntimeError(
-            "RVC v1 models require final_proj, which is not available in "
-            f"the HF HuBERT model ({self._hf_model_id}). "
-            "Use RVC v2 models, or extract final_proj weights from "
-            "hubert_base.pt and place them alongside the model."
-        )
-
-    # Делегирование стандартных nn.Module методов (уже есть через наследование,
-    # но .to() нужно перехватить, чтобы переводить и внутреннюю HF-модель)
-    def to(self, *args, **kwargs):
-        self.model = self.model.to(*args, **kwargs)
-        return super().to(*args, **kwargs)
+        return self.model.final_proj(feats)
 
 
 def load_hubert(config, lib_dir):
-    """HF-based HuBERT loader — полная замена fairseq checkpoint_utils.
+    """HF-based ContentVec loader — полная замена fairseq checkpoint_utils.
 
-    Загружает facebook/hubert-base-ls960 через transformers.HubertModel.
+    Загружает lengyue233/content-vec-best через transformers.HubertModelWithFinalProj.
     HF-кеш управляется через HF_HOME/HUGGINGFACE_HUB_CACHE env vars
     (настраиваются в text_to_speech.py до импорта rvc_python).
     """
-    hf_model_id = os.environ.get("RVC_HUBERT_MODEL_ID", HubertHFWrapper.DEFAULT_HF_MODEL_ID)
+    hf_model_id = os.environ.get(
+        "RVC_HUBERT_MODEL_ID", HubertHFWrapper.DEFAULT_HF_MODEL_ID
+    )
     wrapper = HubertHFWrapper(
         hf_model_id=hf_model_id,
         device=config.device,
         is_half=config.is_half,
     )
     _utils_logger.info(
-        "HuBERT loaded via HF (%s), device=%s, is_half=%s",
+        "ContentVec loaded via HF (%s), device=%s, is_half=%s",
         hf_model_id, config.device, config.is_half,
     )
     return wrapper
 ```
 
-**Ключевые отличия от старого плана**:
-- fairseq нет ВООБЩ — ни импорта, ни stub'а, ни monkey-patch'а.
+**Ключевые отличия от iter-111 плана** (исправлено iter-112, KI#85):
+- HF-модель: `lengyue233/content-vec-best` (ContentVec), а НЕ `facebook/hubert-base-ls960` (стандартный HuBERT для ASR).
+- Обёртка: наследует `HubertModelWithFinalProj` (загружает `final_proj` веса из ContentVec) — v1-модели работают.
+- `attention_mask = (~padding_mask.bool()).long()` (LongTensor), а НЕ `~padding_mask` (bool, HF падает на некоторых версиях).
+- `final_proj(feats)` делегирует в подкласс (раньше выбрасывал RuntimeError → ломал v1).
+- fairseq нет ВООБЩЕ — ни импорта, ни stub'а, ни monkey-patch'а.
 - `load_hubert` — нормальная функция, не патч.
-- `HubertHFWrapper` — полноценный `nn.Module`, эмулирует контракт через `extract_features` + `final_proj` (заглушка).
-- `final_proj` не загружает `final_proj.pt` — v2 дефолт, v1 выдаёт понятную ошибку.
-- Переменная окружения `RVC_HUBERT_MODEL_ID` позволяет переключить HF-модель без правки кода.
+- Переменная окружения `RVC_HUBERT_MODEL_ID` позволяет переключить HF-модель (например, на `lj1995/VoiceConversionWebUI/hubert_base`).
 
 ### 2.4. Переписанный `lib/jit/get_hubert.py` (форк)
 
@@ -357,7 +397,7 @@ except ImportError:
 ### 2.7. Правки в SoW: `requirements.txt`
 
 1. **Удалить** строку 58: `fairseq==0.12.2`
-2. **Заменить** строку 191: `rvc-python @ git+https://github.com/JarodMica/rvc-python@9a67ac7...` → URL форка (см. §3).
+2. **Заменить** строку 191: `rvc-python @ git+https://github.com/JarodMica/rvc-python@9a67ac7...` → URL форка `vudirvp-sketch/rvc-python` (см. §3).
 
 ### 2.8. Правки в SoW: `app/utils/rvc_hubert_hf.py`
 
@@ -369,11 +409,12 @@ except ImportError:
 
 | iter | Этап | Объём | Риск |
 |------|------|-------|------|
-| **111** | (Этот документ) Переписать план — полный пересмотр подхода. | docs только | 0 |
-| **112** | Форкнуть `JarodMica/rvc-python` → `vudirvp-sketch/rvc-python`. В форке: переписать `modules/vc/utils.py` (§2.3), `lib/jit/get_hubert.py` (§2.4), `download_model.py` (§2.5). Запушить форк. | ~120 строк в 3 файлах | низкий — форк независим, можно тестировать отдельно |
-| **113** | SoW: удалить safe_globals-костыль из `text_to_speech.py:30-35`, заменить `rvc-python` на форк в `requirements.txt:191`, удалить `fairseq==0.12.2` из `requirements.txt:58`. | ~7 строк в 2 файлах | средний — требует переустановки env + верификации |
-| **114** | A/B-тест: генерация речи через форк (HF HuBERT) vs оригинальный rvc-python (fairseq HuBERT). Сравнение спектрограмм/слепое прослушивание. | тестовый скрипт | низкий |
-| **115** | Если A/B OK: обновить STATUS.md (закрыть KI#83), AGENT_NAVIGATION.md (§4 Pitfalls + §1 line counts), worklog.md. Удалить старый `scripts/iter108_smoke_test.py` / `scripts/iter109_smoke_test.py` (больше не актуальны — тестировали monkey-patch подход). | docs/cleanup | 0 |
+| **111** | Переписать план — полный пересмотр подхода (stub/monkey-patch → форк rvc-python). | docs только | 0 |
+| **112** | (Этот документ) Верификация iter-111 плана против upstream-репозиториев. Найдено 6 ошибок (KI#85): неверная HF-модель, plain HubertModel vs HubertModelWithFinalProj, attention_mask тип, fairseq в pyproject.toml форка, JarodMica — не «ноу-нейм», 2 пропущенных альтернативы. Все 6 исправлены в плане. | docs только | 0 |
+| **113** | Форкнуть `daswer123/rvc-python@cff3ffb` (v0.1.5) → `vudirvp-sketch/rvc-python`. В форке: переписать `modules/vc/utils.py` (§2.3), `lib/jit/get_hubert.py` (§2.4), `download_model.py` (§2.5), удалить `fairseq==0.12.2` из `pyproject.toml`. Запушить форк. | ~125 строк в 4 файлах | низкий — форк независим, можно тестировать отдельно |
+| **114** | SoW: удалить safe_globals-костыль из `text_to_speech.py:30-35`, заменить `rvc-python` на форк в `requirements.txt:191`, удалить `fairseq==0.12.2` из `requirements.txt:58`. | ~7 строк в 2 файлах | средний — требует переустановки env + верификации |
+| **115** | A/B-тест: генерация речи через форк (HF ContentVec) vs оригинальный rvc-python (fairseq ContentVec). Сравнение спектрограмм/слепое прослушивание. | тестовый скрипт | низкий |
+| **116** | Если A/B OK: обновить STATUS.md (закрыть KI#83, KI#85), AGENT_NAVIGATION.md (§4 Pitfalls + §1 line counts), worklog.md. Удалить старый `scripts/iter108_smoke_test.py` / `scripts/iter109_smoke_test.py` (больше не актуальны — тестировали monkey-patch подход). | docs/cleanup | 0 |
 
 Если A/B fails → откатить requirements.txt к оригинальному rvc-python + fairseq, документировать причину в STATUS.md как KI.
 
@@ -392,12 +433,13 @@ except ImportError:
 
 | Риск | Вероятность | Митигация |
 |------|-------------|-----------|
-| HF HuBERT выдаёт фичи, отличающиеся от fairseq (layer_norm позиции, padding_mask обработка) | средняя | A/B-тест на спектрограмме. Если отличаются — инспектировать `transformers.models.hubert.modeling_hubert.HubertModel.forward` и сравнивать с `get_hubert.py:extract_features`. |
-| Пользователь загрузит RVC v1 `.pth` модель | низкая (дефолт v2) | Явная `RuntimeError` в `final_proj()` с инструкцией. Дополнительно: detection в `load_model` — если `cpt.get("version") == "v1"`, warn пользователя. |
-| `transformers.HubertModel` ломит совместимость с `torch==2.10.0+cu128` | низкая (4.57.3 поддерживает) | Если упадёт — downgrade `transformers` до 4.40-4.50. |
-| Upstream rvc-python выпустит обновление с новыми фичами, и форк отстанет | низкая (pinned-коммит; rvc-python — зрелый, редко обновляется) | При необходимости: rebase форка на новый upstream-коммит, повторить правки в 3 файлах. |
+| HF ContentVec выдаёт фичи, отличающиеся от fairseq ContentVec (padding_mask обработка, normalization) | низкая (верифицировано официальным RVC, тот же ContentVec) | A/B-тест на спектрограмме. Если отличаются — инспектировать `transformers.models.hubert.modeling_hubert.HubertModel.forward` и сверять с `infer/hubert.py` официального RVC. |
+| Пользователь загрузит RVC v1 `.pth` модель | низкая (дефолт v2) | iter-112 fix: `HubertModelWithFinalProj` загружает `final_proj` веса из ContentVec → v1 работает. Дополнительно: detection в `load_model` — если `cpt.get("version") == "v1"`, warn пользователя. |
+| `transformers.HubertModel` ломит совместимость с `torch==2.10.0+cu128` | низкая (4.57.3 подтверждено `ultimate-rvc==0.6.0` в проде) | Если упадёт — downgrade `transformers` до 4.49.0<4.50 (как в официальном RVC). |
+| Upstream rvc-python выпустит обновление с новыми фичами, и форк отстанет | низкая (daswer123 — последний коммит Oct 2024, зрелый) | При необходимости: rebase форка на новый upstream-коммит, повторить правки в 3 файлах + pyproject.toml. |
 | `lib/jit/get_hubert.py` ONNX-экспорт не используется в SoW, но может понадобиться | низкая | Правка включена превентивно. Если ONNX-экспорт сломается — легко откатить только этот файл. |
-| `download_model.py` правка неполна — оригинальная логика скачивания rmvpe.pt не скопирована | средняя | На iter-112: скопировать оригинальную логику скачивания rmvpe.pt из upstream, только убрать hubert_base.pt. |
+| `download_model.py` правка неполна — оригинальная логика скачивания rmvpe.pt не скопирована | средняя | На iter-113: скопировать оригинальную логику скачивания rmvpe.pt из upstream, только убрать hubert_base.pt. |
+| HF-кеш растёт: ContentVec ~370 МБ + возможные повторные скачивания | низкая | HF-кеш уже настроен в `text_to_speech.py:39-45` через `HF_HOME`/`HUGGINGFACE_HUB_CACHE` в `app/models/hf_cache`. |
 
 ---
 
@@ -430,6 +472,22 @@ except ImportError:
 - Риск: runtime-костыли, GAP-A/B, технический долг.
 - Решение: **отклонено заказчиком** — «не хочу костылей и каких либо остатков fairseq».
 
+### 7.4. Путь E (новое, iter-112): использовать `ultimate-rvc==0.6.0` (PyPI)
+- Найден в iter-112 при поиске пропущенных альтернатив. 318★ на GitHub, MIT, `transformers==4.57.3` (точное совпадение с SoW), Python 3.12+, уже реализован fairseq-free HuBERT loader.
+- Минусы: приносит ~30 тяжёлых зависимостей (gradio, audio-separator, yt-dlp, nodejs-wheel-binaries, static-ffmpeg, static-sox, pedalboard, noisereduce, tensorboard, torch-tb-profiler и др.). API отличается от rvc-python — потребуется переписать SoW интеграцию. Это приложение, а не библиотека.
+- Решение: отклонено как drop-in replacement. Но код `ultimate-rvc/rvc/lib/utils.py` (их `HubertModelWithFinalProj` + `load_embedding`) — полезный референс для нашего форка.
+
+### 7.5. Путь F (новое, iter-112): inline RVC pipeline в SoW (Путь 2 из исследования)
+- Полностью убрать rvc-python из requirements.txt, реализовать RVC pipeline в SoW (~400-500 строк), используя HF HuBERT loader из официального RVC `infer/hubert.py`.
+- Плюсы: 0 third-party RVC deps, нет риска заброшенности upstream.
+- Минусы: ~500 строк нового кода в SoW, берём на себя поддержку всех багфиксов RVC pipeline.
+- Решение: отклонено в пользу Path 1 (меньше кода, proven reference от авторов RVC). Может быть пересмотрено если Path 1 столкнётся с непреодолимыми проблемами.
+
+### 7.6. Путь G (новое, iter-112): torchaudio.pipelines.HUBERT_BASE
+- SoW уже имеет `torchaudio==2.10.0` в requirements.txt:229. `torchaudio.pipelines.HUBERT_BASE` предоставляет стандартный HuBERT, но НЕ ContentVec.
+- Чтобы использовать ContentVec веса, нужен ручной ремап ~90 тензоров ключей.
+- Решение: отклонено — больше работы, чем Path 1, без явных преимуществ.
+
 ---
 
 ## 8. Итог
@@ -442,17 +500,19 @@ except ImportError:
 
 ---
 
-## 9. Audit checklist (перед iter-112)
+## 9. Audit checklist (перед iter-113)
 
-1. **Форк создан**: `vudirvp-sketch/rvc-python` существует на GitHub, базируется на `9a67ac7`.
-2. **utils.py не содержит fairseq**: grep по форку → 0 совпадений `fairseq`.
-3. **utils.py экспортирует load_hubert**: `from rvc_python.modules.vc.utils import load_hubert` работает.
-4. **HubertHFWrapper — nn.Module**: `isinstance(wrapper, torch.nn.Module)` == True.
-5. **Контракт extract_features**: `wrapper.extract_features(source, padding_mask, output_layer=12)` возвращает `(feats, padding_mask)` с правильными размерностями.
-6. **modules.py не изменён**: `from .utils import *` продолжает работать, `vc_single()` вызывает обновлённую `load_hubert`.
-7. **download_model.py не скачивает hubert_base.pt**: только rmvpe.pt.
-8. **requirements.txt SoW**: нет `fairseq`, rvc-python URL указывает на форк.
-9. **text_to_speech.py**: нет fairseq-импортов, нет safe_globals-костыля, нет stub'а, нет monkey-patch'а.
-10. **Приложение стартует без fairseq в env**: `python main.py` не падает с `ModuleNotFoundError: fairseq`.
-
-Если хотя бы один пункт fails → iter-112 не закрывать, фиксить в том же коммите.
+1. **Форк создан**: `vudirvp-sketch/rvc-python` существует на GitHub, базируется на `daswer123/rvc-python@cff3ffb` (v0.1.5).
+2. **utils.py не содержит fairseq**: grep по форку → 0 совпадений `fairseq` в `.py` файлах.
+3. **pyproject.toml форка не содержит fairseq**: grep по `pyproject.toml` → 0 совпадений `fairseq` (daswer123@0.1.5 пинит, нужно удалить).
+4. **utils.py экспортирует load_hubert**: `from rvc_python.modules.vc.utils import load_hubert` работает.
+5. **HubertHFWrapper — nn.Module**: `isinstance(wrapper, torch.nn.Module)` == True.
+6. **HubertModelWithFinalProj загружает final_proj веса**: `wrapper.model.final_proj` — `nn.Linear(768, 256)`, веса не None.
+7. **Контракт extract_features**: `wrapper.extract_features(source, padding_mask, output_layer=12)` возвращает `(feats, padding_mask)` с правильными размерностями.
+8. **v1 работает**: `wrapper.extract_features(source, padding_mask, output_layer=9)` → `wrapper.final_proj(feats)` → 256-dim output (не RuntimeError).
+9. **modules.py не изменён**: `from .utils import *` продолжает работать, `vc_single()` вызывает обновлённую `load_hubert`.
+10. **download_model.py не скачивает hubert_base.pt**: только rmvpe.pt.
+11. **requirements.txt SoW**: нет `fairseq`, rvc-python URL указывает на форк.
+12. **text_to_speech.py**: нет fairseq-импортов, нет safe_globals-костыля, нет stub'а, нет monkey-patch'а.
+13. **Приложение стартует без fairseq в env**: `python main.py` не падает с `ModuleNotFoundError: fairseq`.
+14. **HF ContentVec скачалась**: `app/models/hf_cache/` содержит `content-vec-best` (~370 МБ).
