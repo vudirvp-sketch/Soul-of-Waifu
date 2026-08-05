@@ -2,6 +2,21 @@
 
 ---
 
+Task ID: iter-110-fork-reset-cleanup-and-plan-audit
+Agent: Super Z (main)
+Task: User redirected fork to fairseq removal + dep audit. Clean up all old open KIs. Audit `docs/fairseq_removal_plan.md` for factual accuracy.
+
+Work Log:
+- Closed 4 old KIs as out-of-scope (fork redirect): KI#65 (qasync task race), KI#70 (stop_tokens atomic check), KI#71 (reasoning extraction false-positive), KI#73 (multi-template GGUF selection). KI#83 stays OPEN — fork's main task.
+- Audited `docs/fairseq_removal_plan.md` against current repo state — found 8 factual errors: fairseq version 0.12.3→0.12.2 (line 58 not 55); transformers/rvc-python line refs 235/191 not 212/173; `text_to_speech.py` line refs 28/30-35/39-45/198 not 25/27-32/37-42/195; `installer.bat:93 --no-deps` claim is FALSE (installer.bat does NOT install rvc-python at all — line 93 is `python -m pip check`; rvc-python comes only from `requirements.txt:191`). All 8 fixed in plan doc.
+- Verified iter-108/109 main-line implementation is NOT in this fork: `text_to_speech.py:30-35` still has safe_states hack; no `app/utils/rvc_hubert_hf.py`; no `_install_fairseq_stub()`; no dual-target monkey-patch. KI#83 implementation must be re-executed from scratch (iter-112+).
+- Housekeeping: STATUS.md — 3 stale iter-107/108/109 prose sections collapsed into history rows; history table trimmed 31→30 (deleted iter-79 + iter-80, added iter-110); Closed KIs gained KI#65/70/71/73 (KI#84 retained, <2 iter old). worklog.md one-in-one-out — deleted iter-102.
+
+Stage Summary:
+- KI#65/70/71/73 CLOSED. KI#83 stays OPEN. Files changed: `STATUS.md`, `worklog.md`, `docs/fairseq_removal_plan.md`. Doc-only iteration. Next: iter-111 nav file refresh (`AGENT_NAVIGATION.md §1` stale line counts), iter-112 execute plan §2.
+
+---
+
 Task ID: iter-109-ki84-mistral-role-alternation-fix
 Agent: Super Z (main)
 Task: Fix KI#84 — KI#80 placeholder-strip broke Mistral-family chat templates (HTTP 400 `roles must alternate`). User log: `MN-Violet-Lotus-12B` (Tekken, embedded Jinja = mistral-v0-1).
@@ -150,19 +165,5 @@ Work Log:
 
 Stage Summary:
 - KI#81 CLOSED. KI#82 OPENED. Files changed: prompt_engine.py, STATUS.md, worklog.md.
-
----
-
-Task ID: iter-102-ki81-root-cause-research
-Agent: Super Z (main)
-Task: Research iteration — verify chat template / stop words / reasoning mode for KI#81, consult external 2026 sources.
-
-Work Log:
-- Verified all 3 user questions CORRECT: chat template = GGUF-embedded Llama-3; stop words = `['<|eot_id|>']`; reasoning NOT interfering.
-- KI#80 fix VERIFIED working in log. Root cause for "still broken": max_tokens=875 too low.
-- 3 code bugs found (deferred): finish_reason hardcoded; tokens_out misleading; streaming overhead.
-
-Stage Summary:
-- KI#81 OPEN → ANALYZED. No code changes (research iteration).
 
 ---

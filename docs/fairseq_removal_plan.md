@@ -1,12 +1,13 @@
-# План: удаление fairseq из Soul of Waifu (iter-107 → iter-107-audit)
+# План: удаление fairseq из Soul of Waifu (iter-107 → iter-107-audit → iter-110-audit)
 
-**Дата**: 2026-08-02 (audit: 2026-08-02)
+**Дата**: 2026-08-02 (audit: 2026-08-02, re-audit: 2026-08-06)
 **Масштаб**: Normal (1 новый файл ~180 строк + правки в `text_to_speech.py` + 1 строка в `requirements.txt`)
 **Путь**: A — замена загрузчика HuBERT на HF-версию
 
 **История ревизий**:
 - iter-107: первичный план (8 разделов).
 - iter-107-audit: добавлены GAP-A и GAP-B (KI#83, BLOCKING). Без этих фиксов iter-110 падает с `ModuleNotFoundError: fairseq` на старте приложения, а monkey-patch в iter-108/109 silently no-op. См. §1.7, §1.8, §2.2.
+- iter-110-audit: сверка с актуальным состоянием репозитория `vudirvp-sketch/Soul-of-Waifu`. Найдено и исправлено 8 фактических ошибок: версия fairseq (0.12.3 → 0.12.2), 6 неверных номеров строк (`requirements.txt: 55/173/212 → 58/191/235`; `text_to_speech.py: 25/27-32/37-42/195 → 28/30-35/39-45/198`), удалён ложный assertion про `installer.bat:93 --no-deps` (installer.bat вообще не ставит rvc-python — он приходит только через `requirements.txt:191`).
 
 ---
 
@@ -14,7 +15,7 @@
 
 ### 1.1. Где fairseq реально используется
 
-В коде SoW (`app/utils/text_to_speech.py:27-32`) — только safe_globals-костыль для `torch.load`:
+В коде SoW (`app/utils/text_to_speech.py:30-35`) — только safe_globals-костыль для `torch.load`:
 ```python
 import torch.serialization
 try:
@@ -23,7 +24,7 @@ try:
 except ImportError:
     pass
 ```
-Это не «использование fairseq как библиотеки», а «разрешение torch десериализовать HuBERT-чекпойнт». Реальный потребитель fairseq — `rvc-python@9a67ac7` (pinned в `requirements.txt:173`).
+Это не «использование fairseq как библиотеки», а «разрешение torch десериализовать HuBERT-чекпойнт». Реальный потребитель fairseq — `rvc-python@9a67ac7` (pinned в `requirements.txt:191`).
 
 ### 1.2. Точка входа fairseq внутри rvc-python
 
@@ -69,7 +70,7 @@ feats = model.final_proj(logits[0]) if version == "v1" else logits[0]
 ### 1.5. v1 vs v2
 
 - `rvc_python/infer.py:65`: `load_model(model_name, version="v2")` — **по умолчанию v2**.
-- `text_to_speech.py:195` вызывает `self.rvc.load_model(model_name)` без указания version → v2.
+- `text_to_speech.py:198` вызывает `self.rvc.load_model(model_name)` без указания version → v2.
 - Для v2 `final_proj` НЕ нужен (`pipeline.py:223`: `feats = logits[0]`).
 - v1 в SoW сейчас возможен только если пользователь положит v1 `.pth` в `assets/rvc_models/<name>/` и `load_model` обнаружит `version=v1` внутри чекпойнта — но это переопределяется аргументом `version="v2"` в `infer.py:65,107`. То есть фактически v1 путь в SoW не используется.
 
@@ -77,10 +78,10 @@ feats = model.final_proj(logits[0]) if version == "v1" else logits[0]
 
 ### 1.6. Зависимости
 
-- `transformers==4.57.3` **уже в requirements.txt:212** — ничего добавлять.
-- `fairseq==0.12.3` (requirements.txt:55) — удалить (только после того, как stub `sys.modules['fairseq']` из §2.2 уже в коде, иначе падение на старте — см. §1.7).
-- `rvc-python @ git+...` (requirements.txt:173) — оставить, monkey-patch поверх.
-- `installer.bat:93` уже ставит rvc-python с `--no-deps` — справочник rvc-python по-прежнему не тащит fairseq транзитивно, единственный источник — SoW `requirements.txt:55`.
+- `transformers==4.57.3` **уже в requirements.txt:235** — ничего добавлять.
+- `fairseq==0.12.2` (requirements.txt:58) — удалить (только после того, как stub `sys.modules['fairseq']` из §2.2 уже в коде, иначе падение на старте — см. §1.7).
+- `rvc-python @ git+https://github.com/JarodMica/rvc-python@9a67ac7...` (requirements.txt:191) — оставить, monkey-patch поверх.
+- **`installer.bat` НЕ устанавливает rvc-python** (проверено iter-110): в нём нет ни одной команды `pip install rvc-python`/`pip install rvc_python`, флаг `--no-deps` тоже не используется. rvc-python попадает в окружение исключительно через `requirements.txt:191` (стандартный `pip install -r requirements.txt`). Справочник rvc-python fairseq в собственных зависимостях не перечисляет — единственный источник fairseq в env = SoW `requirements.txt:58`.
 
 ### 1.7. GAP-A — import-time зависимость от fairseq (KI#83, BLOCKING)
 
@@ -90,17 +91,17 @@ feats = model.final_proj(logits[0]) if version == "v1" else logits[0]
 rvc_python/modules/vc/utils.py:3   from fairseq import checkpoint_utils
 ```
 
-Эта строка исполняется **в момент импорта** `rvc_python.modules.vc.utils`, который входит в цепочку, триггерящуюся при `from rvc_python.infer import RVCInference` (единственный rvc-python import во всём SoW — `text_to_speech.py:25`, проверено полным grep):
+Эта строка исполняется **в момент импорта** `rvc_python.modules.vc.utils`, который входит в цепочку, триггерящуюся при `from rvc_python.infer import RVCInference` (единственный rvc-python import во всём SoW — `text_to_speech.py:28`, проверено полным grep):
 
 ```
-text_to_speech.py:25  from rvc_python.infer import RVCInference
+text_to_speech.py:28  from rvc_python.infer import RVCInference
   → rvc_python/__init__.py
     → infer.py:5  (импорт modules)
       → modules/vc/modules.py:19  from .utils import *
         → modules/vc/utils.py:3  from fairseq import checkpoint_utils   ← ModuleNotFoundError, если fairseq нет в env
 ```
 
-Monkey-patch `load_hubert` (§2.2 ниже) **не** нейтрализует эту строку — она выполняется раньше любого прикладного кода SoW. Удаление `fairseq==0.12.3` из `requirements.txt` без stub'а → `ModuleNotFoundError: fairseq` на старте приложения.
+Monkey-patch `load_hubert` (§2.2 ниже) **не** нейтрализует эту строку — она выполняется раньше любого прикладного кода SoW. Удаление `fairseq==0.12.2` из `requirements.txt` без stub'а → `ModuleNotFoundError: fairseq` на старте приложения.
 
 **Фикс** (детали в §2.2.1): до строки `from rvc_python.infer import RVCInference` в `text_to_speech.py` inject'нуть в `sys.modules` stub-модуль `fairseq` + `fairseq.checkpoint_utils`. Stub устанавливается только если real fairseq ещё не в `sys.modules` (если уже импортирован кем-то раньше — пропускаем, не затеняем). Если fairseq установлен, но ещё не импортирован — stub встаёт первым и real fairseq не поднимается (это нормально: monkey-patch `load_hubert` заменяет единственного потребителя `checkpoint_utils.load_model_ensemble_and_task`, так что stub-реализация этой функции никогда не вызывается). Если fairseq удалён — stub удовлетворит `from fairseq import checkpoint_utils`.
 
@@ -262,7 +263,7 @@ def _hf_load_hubert(config, lib_dir):
     return wrapper
 
 # CRITICAL: patch BOTH namespaces. Order matters only if modules.py hasn't been
-# imported yet — but text_to_speech.py:25 already triggered the chain, so both
+# imported yet — but text_to_speech.py:28 already triggered the chain, so both
 # modules are loaded and both names exist by the time we reach this line.
 _rvc_utils.load_hubert = _hf_load_hubert
 _rvc_modules.load_hubert = _hf_load_hubert
@@ -280,7 +281,7 @@ assert _rvc_utils.load_hubert is _hf_load_hubert, \
 
 ### 2.3. Удаление safe_globals-костыля
 
-`text_to_speech.py:27-32` — удалить полностью (больше не нужно, `torch.load` для fairseq-чекпойнта не вызывается). Stub `sys.modules['fairseq']` из §2.2.1 заменяет эту защиту по всему модулю.
+`text_to_speech.py:30-35` — удалить полностью (больше не нужно, `torch.load` для fairseq-чекпойнта не вызывается). Stub `sys.modules['fairseq']` из §2.2.1 заменяет эту защиту по всему модулю.
 
 **Важно**: stub из §2.2.1 должен идти **до** удаления safe_globals-костыля в одной правке. Промежуточное состояние (удалён safe_globals, нет stub'а) упадёт на старте, если fairseq уже удалён. Порядок правок в iter-108: (1) добавить stub, (2) добавить monkey-patch, (3) удалить safe_globals — всё в одном коммите.
 
@@ -310,7 +311,7 @@ assert _rvc_utils.load_hubert is _hf_load_hubert, \
 
 ### 2.5. `requirements.txt`
 
-Удалить строку 55: `fairseq==0.12.3`.
+Удалить строку 58: `fairseq==0.12.2`.
 
 **Жёсткое предусловие** (без него iter-110 падает на старте):
 1. Stub `sys.modules['fairseq']` (§2.2.1) уже в коде и протестирован в iter-108.
@@ -330,7 +331,7 @@ assert _rvc_utils.load_hubert is _hf_load_hubert, \
 | **107-audit** | KI#83 OPEN: найдены GAP-A (import-time dep) и GAP-B (двойная цель monkey-patch). План обновлён (этот документ). | docs только | 0 |
 | **108** | Создать `app/utils/rvc_hubert_hf.py` + stub `fairseq` (§2.2.1) + двойной monkey-patch (§2.2.3) + удалить safe_globals (§2.3). **fairseq НЕ удалять из requirements.txt** (fallback через try/except + реальный fairseq). Временный assert §2.2.4 на первый запуск. | ~200 строк | низкий — fallback есть, assert ловит GAP-B |
 | **109** | A/B-тест: генерация речи с одним и тем же `.pth` через fairseq (временный откат патча) и через HF, сравнение спектрограмм/слепое прослушивание. **Предусловие**: assert §2.2.4 подтверждает, что A/B реально тестирует HF, а не fairseq-vs-fairseq. | тестовый скрипт | низкий |
-| **110** | Если A/B OK: удалить `fairseq` из requirements.txt (§2.5), обновить `AGENT_NAVIGATION.md §4` (Pitfalls) запиской про stub. Удалить временный assert §2.2.4. | ~10 строк | требует переустановки env |
+| **110** | Если A/B OK: удалить `fairseq` из requirements.txt:58 (§2.5), обновить `AGENT_NAVIGATION.md §4` (Pitfalls) запиской про stub. Удалить временный assert §2.2.4. | ~10 строк | требует переустановки env |
 | **111** | (Опционально) Monkey-patch `download_rvc_models` для пропуска `hubert_base.pt` (~30 строк) | ~30 строк | низкий |
 
 **iter-110 БЕЗ фиксов A+B запускать нельзя** — приложение упадёт с `ModuleNotFoundError: fairseq` на старте (GAP-A) или продолжит ходить через fairseq (GAP-B, при установленных deps) — но в обоих случаях результат не тот, что обещает план.
@@ -342,7 +343,7 @@ assert _rvc_utils.load_hubert is _hf_load_hubert, \
 1. **Спектрограмма**: для одного входного WAV и одного `.pth`-модели сравнить мел-спектрограммы выхода RVC через fairseq и через HF. Допуск: RMS различия < 1% по всему файлу.
 2. **Слепое прослушивание**: 3 образца, 2 слушателя. Если оба не могут различить — pass.
 3. **Перформанс**: время инференса на CPU/GPU. HF-версия ожидается равной или быстрее (нет overhead fairseq-checkpoint-loader).
-4. **Память**: HF HuBERT base — ~370 МБ весов (`pytorch_model.bin`), ровно столько же, сколько fairseq-версия. Диск: HF-кеш ровно один файл весов (~370 МБ) + `config.json` (~2 КБ). Никаких «state_dict + оптимизатор» — модельное семейство `HubertModel` отдаёт только inference-веса, optimizer state не сохраняется. На GPU можно уменьшить до ~185 МБ через `torch_dtype=torch.float16`. Кеш лежит в `app/models/hf_cache` (уже настроен в `text_to_speech.py:37-42` через `HF_HOME`/`HUGGINGFACE_HUB_CACHE`).
+4. **Память**: HF HuBERT base — ~370 МБ весов (`pytorch_model.bin`), ровно столько же, сколько fairseq-версия. Диск: HF-кеш ровно один файл весов (~370 МБ) + `config.json` (~2 КБ). Никаких «state_dict + оптимизатор» — модельное семейство `HubertModel` отдаёт только inference-веса, optimizer state не сохраняется. На GPU можно уменьшить до ~185 МБ через `torch_dtype=torch.float16`. Кеш лежит в `app/models/hf_cache` (уже настроен в `text_to_speech.py:39-45` через `HF_HOME`/`HUGGINGFACE_HUB_CACHE`).
 
 Если A/B fails → откат к fairseq, документирование причины в STATUS.md как KI.
 
@@ -357,7 +358,7 @@ assert _rvc_utils.load_hubert is _hf_load_hubert, \
 | HF HuBERT выдаёт фичи, отличающиеся от fairseq по subtle причинам (layer_norm позиции, padding_mask обработка) | средняя | A/B-тест на спектрограмме. Если отличаются — инспектировать `transformers.models.hubert.modeling_hubert.HubertModel.forward` и сравнивать с `get_hubert.py:extract_features`. |
 | Пользователь загрузит RVC v1 `.pth` модель | низкая (дефолт v2) | Явная ошибка в `final_proj()` с инструкцией. Дополнительно: detection в `load_model` — если `cpt.get("version") == "v1"`, warn пользователя. |
 | `transformers.HubertModel` ломит совместимость с `torch==2.10.0+cu128` | низкая (4.57.3 поддерживает) | Если упадёт — downgrade `transformers` до 4.40-4.50. |
-| Stub `fairseq.checkpoint_utils` когда-нибудь понадобится с другой сигнатурой (если rvc-python обновит pinned-коммит) | низкая (коммит pinned в requirements.txt:173 + installer.bat:93) | При обновлении pinned-коммита rvc-python — повторить аудит fairseq-usage map, как в iter-107. |
+| Stub `fairseq.checkpoint_utils` когда-нибудь понадобится с другой сигнатурой (если rvc-python обновит pinned-коммит) | низкая (коммит pinned в requirements.txt:191; rvc-python не переустанавливается через `installer.bat` — только через `requirements.txt`) | При обновлении pinned-коммита rvc-python — повторить аудит fairseq-usage map, как в iter-107. |
 | `from rvc_python.modules.vc.utils import *` добавит новые имена в `modules` namespace в будущем rvc-python | низкая (pinned) | Тот же аудит. |
 
 ---
@@ -398,7 +399,7 @@ assert _rvc_utils.load_hubert is _hf_load_hubert, \
 - **Существует ли HF-версия HuBERT, используемого в SoW?** Да — `facebook/hubert-base-ls960`, архитектурно идентичен `hubert_base.pt`.
 - **Сколько кода?** ~200 строк (1 новый файл `app/utils/rvc_hubert_hf.py` + правки в `text_to_speech.py`: stub `sys.modules` + двойной monkey-patch + удаление safe_globals-костыля + 1 строка в `requirements.txt` на iter-110).
 - **Какой риск?** Низкий при условии что GAP-A и GAP-B фиксятся в iter-108 одновременно с monkey-patch. Без GAP-A iter-110 падает на старте; без GAP-B iter-108/109 тестирует не то, что кажется.
-- **Что разблокирует?** Python 3.12+, удаление `fairseq==0.12.3` (проблемная зависимость с conflict'ами на новых pip/setuptools).
+- **Что разблокирует?** Python 3.12+, удаление `fairseq==0.12.2` (проблемная зависимость с conflict'ами на новых pip/setuptools).
 
 ---
 
