@@ -11,38 +11,25 @@
 
 ---
 
-## Iteration 110: fork reset — clean up open KIs + audit fairseq_removal_plan.md
+## Iteration 111: полный пересмотр плана удаления fairseq
 
 **Date**: 2026-08-06
 **Scale**: Normal. Doc-only — no code changes. 3 files: `STATUS.md`, `worklog.md`, `docs/fairseq_removal_plan.md`.
 
-**Task**: User redirected this fork (`vudirvp-sketch/Soul-of-Waifu`) to be dedicated to executing `docs/fairseq_removal_plan.md` + possible dependency audit. Clean up all open KIs inherited from previous main-line work (KI#65/70/71/73) — they are out of scope for this fork. Audit `docs/fairseq_removal_plan.md` for factual accuracy against the current repo state.
+**Task**: Заказчик отказывается от stub/monkey-patch подхода (iter-107→110). Требование: «не хочу костылей и остатков fairseq — с корнем убрать». Полный пересмотр `docs/fairseq_removal_plan.md`: вместо stub `sys.modules['fairseq']` + dual-target monkey-patch → **форк rvc-python** с заменой fairseq→HF HuBERT внутри форка.
 
-**Audit findings (`docs/fairseq_removal_plan.md`)** — 8 factual errors, all corrected in this iteration:
-
-| Plan claim | Actual repo state | Fix |
-|------------|-------------------|-----|
-| `fairseq==0.12.3` at `requirements.txt:55` | `fairseq==0.12.2` at line 58 | version + line |
-| `transformers==4.57.3` at `requirements.txt:212` | line 235 | line |
-| `rvc-python @ git+...` at `requirements.txt:173` | line 191 | line |
-| `text_to_speech.py:25` rvc_python import | line 28 | line |
-| `text_to_speech.py:27-32` safe_globals hack | lines 30-35 | line |
-| `text_to_speech.py:37-42` HF_HOME setup | lines 39-45 | line |
-| `text_to_speech.py:195` self.rvc.load_model | line 198 | line |
-| `installer.bat:93` installs rvc-python `--no-deps` | **FALSE** — `installer.bat` does NOT install rvc-python at all (line 93 = `python -m pip check`); rvc-python comes only from `requirements.txt:191` | claim removed |
-
-KIs closed (fork redirect — out of scope): KI#65, KI#70, KI#71, KI#73.
-
-KI#83 stays OPEN — it is the fork's main task. iter-110 audit confirmed the implementation done in iter-108/109 (main-line) is NOT present in this fork (`text_to_speech.py:30-35` still has the safe_states hack; no `rvc_hubert_hf.py`; no `_install_fairseq_stub()`; no dual-target monkey-patch). Plan must be re-executed from scratch here.
+**Изменение подхода**:
+- Старый план (Путь D): stub `sys.modules` + monkey-patch `load_hubert` в двух namespace + отдельный файл `rvc_hubert_hf.py` + GAP-A/B runtime-костыли.
+- Новый план (Путь A-clean): форк `JarodMica/rvc-python` → переписать `modules/vc/utils.py` (заменить `from fairseq import checkpoint_utils` на `transformers.HubertModel`) + `lib/jit/get_hubert.py` + `download_model.py` → SoW переключается на форк → `fairseq==0.12.2` удаляется из `requirements.txt` → safe_globals-костыль удаляется из `text_to_speech.py`. Никаких runtime-костылей.
 
 ### Stop point
 
 | Field | Value |
 |-------|-------|
-| Done | `docs/fairseq_removal_plan.md`: 8 factual errors fixed (§1.1, §1.6, §1.7, §2.2.1, §2.2.2, §2.2.3, §2.5 line refs + fairseq version 0.12.3→0.12.2 + installer.bat false claim removed). iter-110 audit note added to revision history. `STATUS.md`: 4 old KIs closed (KI#65/70/71/73 — fork redirect, out of scope). Three stale iter-107/108/109 prose sections collapsed into history rows. History table trimmed 31→30 (deleted iter-79 + iter-80, added iter-110). `worklog.md`: one-in-one-out (deleted iter-102, added iter-110). |
-| Not done | Navigation files audit — `AGENT_NAVIGATION.md §1` line counts stale (interface_signals.py 16259→17351, custom_widgets.py 8896→9567, sowInterface.py 6730→7153, sow_system_signals.py 4234→4596, soul_stage_page.py 3357→3977). Deferred to iter-111. KI#83 implementation (the actual fairseq removal) — pending iter-112+. |
-| Next step | iter-111: refresh `AGENT_NAVIGATION.md §1` file line counts (5 stale entries) + sweep §4 Pitfalls for stale KI references. iter-112: execute `docs/fairseq_removal_plan.md §2` (stub + dual-target monkey-patch + temp assert + safe_states removal). Then iter-113 A/B, iter-114 fairseq removal from `requirements.txt:58`. |
-| Active KIs | KI#83 (open — fork's main task; plan audited iter-110, implementation pending) |
+| Done | `docs/fairseq_removal_plan.md` полностью переписан (9 разделов, ~300 строк). Подход: форк rvc-python + HF HuBERT. Нет stub'ов, нет monkey-patch'ей, нет GAP-A/B. Этапы: iter-112 (форк + правки), iter-113 (SoW: requirements.txt + text_to_speech.py), iter-114 (A/B-тест), iter-115 (cleanup docs). |
+| Not done | KI#83 implementation (создание форка + правки кода). AGENT_NAVIGATION.md §1 line counts stale (5 entries). |
+| Next step | iter-112: форкнуть `JarodMica/rvc-python` → `vudirvp-sketch/rvc-python`, переписать 3 файла, запушить. iter-113: SoW переключение на форк + удаление fairseq. |
+| Active KIs | KI#83 (open — подход изменён на форк rvc-python; план переписан iter-111, реализация pending iter-112+) |
 
 ---
 
@@ -50,7 +37,8 @@ KI#83 stays OPEN — it is the fork's main task. iter-110 audit confirmed the im
 
 | Iter | Date | KI(s) | Summary |
 |------|------|-------|---------|
-| 110 | 2026-08-06 | KI#65/70/71/73→CLOSED | Fork reset: 4 old KIs closed (out of scope). `fairseq_removal_plan.md` audited — 8 factual errors fixed (line numbers + version + installer.bat false claim). Doc-only. |
+| 111 | 2026-08-06 | KI#83 | Plan fully revised: stub/monkey-patch → fork rvc-python + HF HuBERT (clean removal, no runtime crutches). |
+| 110 | 2026-08-06 | KI#65/70/71/73→CLOSED | Fork reset: 4 old KIs closed (out of scope). `fairseq_removal_plan.md` audited — 8 factual errors fixed. Doc-only. |
 | 109 | 2026-08-04 | KI#84→CLOSED | Fix: KI#80 placeholder-strip broke Mistral-family templates (HTTP 400 `roles must alternate`). Added `CapabilityMap.requires_role_alternation`; strip is NO-OP when True. Smoke 18 PASS. Main-line, not in this fork. |
 | 108 | 2026-08-03 | KI#83 | Implement (main-line, NOT in this fork): new `app/utils/rvc_hubert_hf.py`; `text_to_speech.py` stub + dual-target monkey-patch + 2 temp asserts + removed safe_states hack. Smoke 22 PASS. |
 | 107-audit | 2026-08-02 | KI#83 | Plan-doc update: §1.7 GAP-A (import-time dep) + §1.8 GAP-B (dual-target monkey-patch) + §2.2 rewritten (4 sub-blocks) + §9 audit checklist. |
@@ -78,8 +66,6 @@ KI#83 stays OPEN — it is the fork's main task. iter-110 audit confirmed the im
 | 85 | 2026-08-01 | KI#59 | Cloud API provider fixes (cross-provider parity). |
 | 84 | 2026-08-01 | — | Cleanup stale smoke tests from iter-78/80. |
 | 83 | 2026-08-01 | — | DeepSeek provider parity. |
-| 82 | 2026-08-01 | — | UI slider for `reasoning_budget_fraction`. |
-| 80.1 | 2026-08-01 | — | `reasoning_budget_message` opt-in injection. |
 
 ---
 
@@ -87,7 +73,7 @@ KI#83 stays OPEN — it is the fork's main task. iter-110 audit confirmed the im
 
 | KI# | Severity | Description | Status |
 |-----|----------|-------------|--------|
-| KI#83 | BLOCKING | fairseq→HF HuBERT replacement. Plan audited iter-110 (8 factual errors fixed in `docs/fairseq_removal_plan.md`). Implementation per §2 (stub `sys.modules['fairseq']` + dual-target monkey-patch `utils.load_hubert` + `modules.load_hubert` + temp assert + safe_states removal) PENDING — fork's main task. iter-108/109 main-line implementation NOT in this fork; must re-execute from scratch. | **OPEN** |
+| KI#83 | BLOCKING | fairseq→HF HuBERT replacement. Plan полностью пересмотрен iter-111: подход изменён с stub/monkey-patch на **форк rvc-python** (чистое удаление fairseq без runtime-костылей). Реализация pending iter-112+. | **OPEN** |
 
 ---
 

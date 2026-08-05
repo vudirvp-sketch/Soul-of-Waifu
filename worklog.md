@@ -2,6 +2,21 @@
 
 ---
 
+Task ID: iter-111-plan-revision-fork-approach
+Agent: Super Z (main)
+Task: Полный пересмотр плана удаления fairseq. Заказчик отказывается от stub/monkey-patch подхода — требует чистого удаления «с корнем».
+
+Work Log:
+- Проанализировал все fairseq-референсы в SoW (3 production: text_to_speech.py:30-35 safe_globals, requirements.txt:58, rvc-python@9a67ac7 utils.py:2).
+- Проанализировал rvc-python@9a67ac7 исходники: 2 файла с fairseq-импортами (modules/vc/utils.py, lib/jit/get_hubert.py), fairseq НЕ в dependencies rvc-python.
+- Переписал `docs/fairseq_removal_plan.md` полностью: подход изменён с stub+monkey-patch на **форк rvc-python**. В форке: utils.py (HF HuBERT вместо fairseq checkpoint_utils), get_hubert.py (HF вместо fairseq), download_model.py (пропуск hubert_base.pt). В SoW: удаление safe_globals + замена rvc-python URL + удаление fairseq.
+- Обновил STATUS.md: iter-111 header, KI#83 описание обновлено, history +1/-2 (trim to 30 rows).
+
+Stage Summary:
+- Doc-only. Files changed: `docs/fairseq_removal_plan.md`, `STATUS.md`, `worklog.md`. No code changes. Plan ready for iter-112 (fork rvc-python + implement HF HuBERT).
+
+---
+
 Task ID: iter-110-fork-reset-cleanup-and-plan-audit
 Agent: Super Z (main)
 Task: User redirected fork to fairseq removal + dep audit. Clean up all old open KIs. Audit `docs/fairseq_removal_plan.md` for factual accuracy.
@@ -150,20 +165,3 @@ Work Log:
 
 Stage Summary:
 - KI#82 mitigation #1 applied. Files changed: template_detector.py, STATUS.md, worklog.md. Awaiting user test with Instruct model.
-
----
-
-Task ID: iter-103-ki82-log-fix-and-runaway-diagnosis
-Agent: Super Z (main)
-Task: Fix log preview (200 chars → full response in debug mode) + diagnose model runaway generation.
-
-Work Log:
-- Fixed `prompt_engine.py:log_response_structure()` — added full-response logging at DEBUG level (KI#82). Previously only 200-char preview at INFO, which hid the real symptom.
-- Analyzed new logs: max_tokens=1531, completion=1377, finish_reason=stop, truncated=0. KI#81 truncation issue RESOLVED.
-- Diagnosed KI#82: model generates ~1000 words of multi-turn dialogue for both User and {{char}}, ignoring system prompt ("~300 words", "Avoid speaking for {{user}}"). Root cause: base model (not Instruct) + DRY params too aggressive for creative writing.
-- 3 code bugs still pending: finish_reason hardcoded (interface_signals.py:14089+14366), tokens_out estimate (prompt_engine.py:1106), reasoning log misleading (prompt_engine.py:1052).
-
-Stage Summary:
-- KI#81 CLOSED. KI#82 OPENED. Files changed: prompt_engine.py, STATUS.md, worklog.md.
-
----
