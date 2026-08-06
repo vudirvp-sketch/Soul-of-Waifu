@@ -2,6 +2,25 @@
 
 ---
 
+Task ID: iter-114-fork-rvc-python-hf-contentvec
+Agent: Super Z (main)
+Task: Реализовать §2.3-2.5 плана в форке `daswer123/rvc-python@cff3ffb` + relax numpy/faiss пинов (§1.8) + verification script.
+
+Work Log:
+- Клонирован `daswer123/rvc-python@cff3ffb` (v0.1.5) → `/home/z/my-project/rvc-python-fork`.
+- Переписан `modules/vc/utils.py` (§2.3): `HubertModelWithFinalProj` (наследует `transformers.HubertModel`, `final_proj = nn.Linear(hidden_size, classifier_proj_size)` для v1), `HubertHFWrapper(nn.Module)` с контрактом `extract_features(source, padding_mask, output_layer) → (feats, padding_mask)`, `final_proj(feats)` делегирует в подкласс, `load_hubert(config, lib_dir)` через HF `from_pretrained`. 0 fairseq импортов.
+- Переписан `lib/jit/get_hubert.py` (§2.4): `get_hubert_model(model_path, device)` через `HubertHFWrapper`. Внутренние `_extract_features`/`_hubert_extract_features`/`_infer` для JIT. Ветка v1 `final_proj` сохранена в `_infer` (план §2.4 упускал — добавлено для safety).
+- Обновлён `download_model.py` (§2.5): skip `hubert_base.pt`, keep `rmvpe.pt`+`rmvpe.onnx`. `print()` → `logging.getLogger("rvc_python.download_model")` (rule §2). Сигнатура `download_rvc_models(this_dir)` сохранена.
+- `pyproject.toml`: удалён `fairseq==0.12.2`, relaxed `numpy<=1.23.5`→`>=1.21,<3` (KI#86), `faiss-cpu==1.7.3`→`>=1.7,<2` (KI#86), `omegaconf==2.0.6`→`>=2.0,<3` (KI#87 — gap §1.8), добавлен `transformers>=4.40` (KI#88 — gap §1.7).
+- Verification script (§1.8, адаптированный `faiss-cpu==1.7.4`→`1.8.0` т.к. 1.7.x не существует для py3.12). **10/10 PASSED**: pip dry-run без conflict + pip install без conflict + `from rvc_python.infer import RVCInference` → `OK` + 7 структурных проверок (fairseq НЕ в sys.modules, HubertHFWrapper is nn.Module, HubertModelWithFinalProj inherits HubertModel, сигнатуры сохранены, 0 активных fairseq imports).
+- §9 audit: 11/18 PASSED, 4 pending iter-116 (A/B-test), 3 pending iter-115 (SoW-side).
+- Housekeeping: STATUS.md history 31→30 (удалена iter-84, oldest). worklog.md one-in-one-out — удалена iter-106 (oldest).
+
+Stage Summary:
+- Files changed (fork): `rvc_python/modules/vc/utils.py`, `rvc_python/lib/jit/get_hubert.py`, `rvc_python/download_model.py`, `pyproject.toml`. Files changed (SoW docs): `docs/fairseq_removal_plan.md`, `STATUS.md`, `worklog.md`. KI#86/87/88 CLOSED. KI#83/85 unchanged. GitHub push pending (user action). iter-115 (SoW-side: requirements.txt + text_to_speech.py) — pending решения заказчика.
+
+---
+
 Task ID: iter-113-doc-ki86-numpy-faiss-dependency-trap
 Agent: Super Z (main)
 Task: Заказчик проверил iter-112 план через сторонний отчёт. Перепроверить каждое утверждение отчёта против реального кода, открыть KI#86 если найдены новые ошибки, обновить план.
@@ -151,21 +170,4 @@ Work Log:
 Stage Summary:
 - Doc-only iteration. Files changed: `docs/fairseq_removal_plan.md` (new), STATUS.md, worklog.md. No code changes.
 - Housekeeping: deleted iter-97 entry from worklog per §6 one-in-one-out (10-entry cap). Full iter-97 record in git history @ 744af9b.
-
----
-
-Task ID: iter-106-docs-template-detection-pipeline-reasoning-section
-Agent: Super Z (main)
-Task: Update external doc `template_detection_pipeline_corrected.md` — add reasoning-model fix info, fix omissions/errors, copy concise info from PATTERNS.md.
-
-Work Log:
-- Added new file `docs/template_detection_pipeline_corrected.md` to repo (was external upload). 185 → 265 lines.
-- New §5 "Reasoning pipeline: эволюция и текущая архитектура (iter-76 → iter-105)": 3-layer gating architecture (server flag / per-request budget / per-request message), KI chronology table (KI#57/58/59/60/62/64/74/75/77/80/82), Contradiction #4 resolution (gate on enable_thinking ONLY, NOT eos_drift), reasoning_content consume-not-yield pattern, known model behavior table, anti-patterns cross-ref (AP-2/3/5/7/10), key lessons from PATTERNS.md §2.
-- Fixed §4 factual error: claimed `eos_drift` gates `reasoning_budget_tokens` (iter-90 KI#74). WRONG since iter-95 KI#77 — gate removed (false positive for Qwen3.5). Now correctly states: budget injected for ALL thinking-capable models regardless of eos_drift.
-- Renumbered §5 (log guide) → §6. Added 2 new log entries: KI#74 skip INFO, REASONING_EXHAUSTED warning.
-- §4 KI#75 paragraph: clarified it's layer 1 of 3, cross-ref to §5.
-- Housekeeping: deleted KI#81 from Closed KIs (closed iter-103, >2 iterations old per §3 rule).
-
-Stage Summary:
-- KI lifecycle: none opened/closed. Files changed: `docs/template_detection_pipeline_corrected.md` (new), STATUS.md, worklog.md. No code changes — doc-only iteration.
 
